@@ -10,12 +10,10 @@ const envSchema = z.object({
   XAI_SIP_WEBHOOK_SECRET: z.string().min(1),
   XAI_REALTIME_URL: z.string().url().default('wss://api.x.ai/v1/realtime'),
 
-  TELNYX_API_KEY: z.string().min(1),
-  TELNYX_PUBLIC_KEY: z.string().min(1),
-  TELNYX_CONNECTION_ID: z.string().min(1),
-  TELNYX_OUTBOUND_VOICE_PROFILE_ID: z.string().min(1),
-  TELNYX_CALLER_ID_NUMBER: z.string().min(1),
-  TELNYX_SIP_CONNECTION_ID: z.string().min(1),
+  TWILIO_ACCOUNT_SID: z.string().min(1),
+  TWILIO_AUTH_TOKEN: z.string().min(1),
+  TWILIO_PHONE_NUMBER: z.string().min(1),
+  TWILIO_SIP_DOMAIN: z.string().min(1),
 
   VOICE_MODE: z.enum(['mock', 'live']).default('mock'),
   VOICE_WORKER_INTERNAL_SECRET: z.string().min(1),

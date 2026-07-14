@@ -1,23 +1,74 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'crypto';
 
-function verifyXaiWebhookSignature(
-  payload: string,
+function validateTwilioSignature(
+  url: string,
+  params: Record<string, string>,
   signature: string,
-  secret: string
+  authToken: string
 ): boolean {
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
+  const sortedKeys = Object.keys(params).sort();
+  const dataString = sortedKeys.reduce((acc, key) => acc + key + params[key], url);
+
+  const computed = crypto
+    .createHmac('sha1', authToken)
+    .update(dataString)
+    .digest('base64');
+
   return crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expected, 'hex')
+    Buffer.from(signature),
+    Buffer.from(computed)
   );
 }
 
+describe('Twilio Webhook Signature Verification', () => {
+  const authToken = 'test-auth-token-12345';
+  const url = 'https://voice.example.com/webhooks/twilio/calls';
+
+  it('accepts valid signatures', () => {
+    const params = { CallSid: 'CA123', CallStatus: 'ringing', From: '+15551234567' };
+    const sortedKeys = Object.keys(params).sort();
+    const dataString = sortedKeys.reduce((acc, key) => acc + key + params[key as keyof typeof params], url);
+    const signature = crypto.createHmac('sha1', authToken).update(dataString).digest('base64');
+
+    expect(validateTwilioSignature(url, params, signature, authToken)).toBe(true);
+  });
+
+  it('rejects invalid signatures', () => {
+    const params = { CallSid: 'CA123', CallStatus: 'ringing', From: '+15551234567' };
+    const badSignature = crypto.createHmac('sha1', 'wrong-token').update('bad').digest('base64');
+
+    expect(validateTwilioSignature(url, params, badSignature, authToken)).toBe(false);
+  });
+
+  it('rejects tampered parameters', () => {
+    const params = { CallSid: 'CA123', CallStatus: 'ringing', From: '+15551234567' };
+    const sortedKeys = Object.keys(params).sort();
+    const dataString = sortedKeys.reduce((acc, key) => acc + key + params[key as keyof typeof params], url);
+    const signature = crypto.createHmac('sha1', authToken).update(dataString).digest('base64');
+
+    const tampered = { ...params, CallStatus: 'completed' };
+    expect(validateTwilioSignature(url, tampered, signature, authToken)).toBe(false);
+  });
+});
+
 describe('xAI Webhook Signature Verification', () => {
   const secret = 'test-webhook-secret';
+
+  function verifyXaiWebhookSignature(
+    payload: string,
+    signature: string,
+    webhookSecret: string
+  ): boolean {
+    const expected = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(payload)
+      .digest('hex');
+    return crypto.timingSafeEqual(
+      Buffer.from(signature, 'hex'),
+      Buffer.from(expected, 'hex')
+    );
+  }
 
   it('accepts valid signatures', () => {
     const payload = JSON.stringify({ type: 'realtime.call.incoming', call_id: 'test-123' });
@@ -29,14 +80,6 @@ describe('xAI Webhook Signature Verification', () => {
     const payload = JSON.stringify({ type: 'realtime.call.incoming', call_id: 'test-123' });
     const badSignature = crypto.createHmac('sha256', 'wrong-secret').update(payload).digest('hex');
     expect(verifyXaiWebhookSignature(payload, badSignature, secret)).toBe(false);
-  });
-
-  it('rejects tampered payloads', () => {
-    const payload = JSON.stringify({ type: 'realtime.call.incoming', call_id: 'test-123' });
-    const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-    const tampered = JSON.stringify({ type: 'realtime.call.incoming', call_id: 'hacked' });
-    const tamperedSig = crypto.createHmac('sha256', secret).update(tampered).digest('hex');
-    expect(verifyXaiWebhookSignature(payload, tamperedSig, secret)).toBe(false);
   });
 });
 
@@ -51,15 +94,15 @@ describe('Duplicate Webhook Handling', () => {
   }
 
   it('processes first event', () => {
-    expect(isAlreadyProcessed('telnyx', 'evt-001')).toBe(false);
+    expect(isAlreadyProcessed('twilio', 'evt-001')).toBe(false);
   });
 
   it('rejects duplicate event', () => {
-    expect(isAlreadyProcessed('telnyx', 'evt-001')).toBe(true);
+    expect(isAlreadyProcessed('twilio', 'evt-001')).toBe(true);
   });
 
   it('processes different event from same source', () => {
-    expect(isAlreadyProcessed('telnyx', 'evt-002')).toBe(false);
+    expect(isAlreadyProcessed('twilio', 'evt-002')).toBe(false);
   });
 
   it('processes same event ID from different source', () => {

@@ -1,7 +1,7 @@
 export interface LogContext {
   missionId?: string;
   callSessionId?: string;
-  telnyxCallSessionId?: string;
+  twilioCallSid?: string;
   xaiCallId?: string;
   eventType?: string;
   status?: string;
@@ -20,7 +20,7 @@ const REDACTED_KEYS = new Set([
   'token',
   'SUPABASE_SERVICE_ROLE_KEY',
   'XAI_API_KEY',
-  'TELNYX_API_KEY',
+  'TWILIO_AUTH_TOKEN',
   'VOICE_WORKER_INTERNAL_SECRET',
 ]);
 

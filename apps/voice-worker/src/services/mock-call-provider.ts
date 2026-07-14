@@ -16,7 +16,7 @@ export type MockScenario =
   | 'call_disconnected'
   | 'invalid_phone_number'
   | 'xai_websocket_failure'
-  | 'telnyx_initiation_failure'
+  | 'twilio_initiation_failure'
   | 'hold_timeout';
 
 export const MOCK_SCENARIOS: MockScenario[] = [
@@ -32,7 +32,7 @@ export const MOCK_SCENARIOS: MockScenario[] = [
   'call_disconnected',
   'invalid_phone_number',
   'xai_websocket_failure',
-  'telnyx_initiation_failure',
+  'twilio_initiation_failure',
   'hold_timeout',
 ];
 
@@ -98,8 +98,8 @@ export class MockCallProvider {
         case 'xai_websocket_failure':
           await this.scenarioXaiFailure(missionId, callSessionId);
           break;
-        case 'telnyx_initiation_failure':
-          await this.scenarioTelnyxFailure(missionId, callSessionId);
+        case 'twilio_initiation_failure':
+          await this.scenarioTwilioFailure(missionId, callSessionId);
           break;
         case 'hold_timeout':
           await this.scenarioHoldTimeout(missionId, callSessionId);
@@ -678,7 +678,7 @@ export class MockCallProvider {
     );
   }
 
-  private async scenarioTelnyxFailure(
+  private async scenarioTwilioFailure(
     missionId: string,
     callSessionId: string
   ): Promise<void> {
@@ -687,7 +687,7 @@ export class MockCallProvider {
     await this.failCall(
       missionId,
       callSessionId,
-      'Telnyx call initiation failed: connection_id invalid or account issue'
+      'Twilio call initiation failed: invalid credentials or account issue'
     );
   }
 

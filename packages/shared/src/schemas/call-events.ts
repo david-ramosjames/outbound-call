@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const EVENT_SOURCES = ['telnyx', 'xai', 'system', 'mock'] as const;
+export const EVENT_SOURCES = ['telnyx', 'twilio', 'xai', 'system', 'mock'] as const;
 export type EventSource = (typeof EVENT_SOURCES)[number];
 
 export const CALL_EVENT_TYPES = [

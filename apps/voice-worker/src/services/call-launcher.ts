@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Telnyx } from 'telnyx';
+import Twilio from 'twilio';
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
@@ -7,7 +7,7 @@ import { canTransitionStatus } from '@outbound-call/shared';
 import type { CallMission, CallStatus } from '@outbound-call/shared';
 import { MockCallProvider } from './mock-call-provider.js';
 
-const telnyx = new Telnyx({ apiKey: config.TELNYX_API_KEY });
+const twilioClient = Twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN);
 
 async function updateMissionStatus(
   missionId: string,
@@ -112,7 +112,7 @@ export async function launchCall(missionId: string): Promise<{
 
   // 5. Create call_sessions record
   const callSessionId = uuidv4();
-  const provider = config.VOICE_MODE === 'mock' ? 'mock' : 'telnyx';
+  const provider = config.VOICE_MODE === 'mock' ? 'mock' : 'twilio';
 
   const { error: sessionError } = await supabase.from('call_sessions').insert({
     id: callSessionId,
@@ -152,29 +152,31 @@ export async function launchCall(missionId: string): Promise<{
     return { success: true, callSessionId };
   }
 
-  // 7. Live mode: Telnyx call
+  // 7. Live mode: Twilio call
   try {
     const clientState = Buffer.from(
       JSON.stringify({ correlationToken, missionId, callSessionId })
     ).toString('base64');
 
-    const call = await telnyx.calls.dial({
+    const statusCallbackUrl = `${config.VOICE_WORKER_BASE_URL}/webhooks/twilio/calls?CorrelationToken=${encodeURIComponent(clientState)}`;
+
+    const call = await twilioClient.calls.create({
       to: mission.destination_phone,
-      from: config.TELNYX_CALLER_ID_NUMBER,
-      connection_id: config.TELNYX_CONNECTION_ID,
-      client_state: clientState,
-      sip_transport_protocol: 'TLS',
-      webhook_url: `${config.VOICE_WORKER_BASE_URL}/webhooks/telnyx/calls`,
+      from: config.TWILIO_PHONE_NUMBER,
+      url: `${config.VOICE_WORKER_BASE_URL}/webhooks/twilio/twiml?missionId=${missionId}`,
+      statusCallback: statusCallbackUrl,
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      statusCallbackMethod: 'POST',
     });
 
-    const callControlId = call.data?.call_control_id ?? null;
+    const callSid = call.sid;
 
-    // 8. Save telnyx_call_control_id
-    if (callControlId) {
+    // 8. Save Twilio CallSid (stored in telnyx_call_control_id column for compatibility)
+    if (callSid) {
       await supabase
         .from('call_sessions')
         .update({
-          telnyx_call_control_id: callControlId,
+          telnyx_call_control_id: callSid,
           started_at: new Date().toISOString(),
         })
         .eq('id', callSessionId);
@@ -183,32 +185,32 @@ export async function launchCall(missionId: string): Promise<{
     // 9. Update status to 'dialing'
     await updateMissionStatus(missionId, 'dialing');
     await createSystemEvent(missionId, callSessionId, 'telnyx_call_initiated', {
-      callControlId,
+      callSid,
       to: mission.destination_phone,
     });
 
-    logger.info('Telnyx call initiated, status -> dialing', {
+    logger.info('Twilio call initiated, status -> dialing', {
       ...logCtx,
       callSessionId,
     });
 
     return { success: true, callSessionId };
   } catch (err) {
-    logger.error('Telnyx call initiation failed', {
+    logger.error('Twilio call initiation failed', {
       ...logCtx,
       callSessionId,
       error: err,
-      errorCategory: 'telnyx_api',
+      errorCategory: 'twilio_api',
     });
 
     await updateMissionStatus(missionId, 'failed', {
       failure_reason:
-        err instanceof Error ? err.message : 'Telnyx call initiation failed',
+        err instanceof Error ? err.message : 'Twilio call initiation failed',
     });
     await createSystemEvent(missionId, callSessionId, 'call_failed', {
       reason: err instanceof Error ? err.message : 'Unknown error',
     });
 
-    return { success: false, error: 'Telnyx call initiation failed' };
+    return { success: false, error: 'Twilio call initiation failed' };
   }
 }

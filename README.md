@@ -1,6 +1,6 @@
 # AI Outbound Calling - Case Tracker
 
-An AI-powered outbound calling feature for a personal-injury law firm's Case Tracker. Uses xAI's Grok Voice Agent API with Direct SIP integration and Telnyx for PSTN connectivity to automate administrative insurance claim calls.
+An AI-powered outbound calling feature for a personal-injury law firm's Case Tracker. Uses xAI's Grok Voice Agent API with Direct SIP integration and Twilio for PSTN connectivity to automate administrative insurance claim calls.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ Supabase (call_missions record)
       ↓
 Railway Voice Orchestrator (Node.js)
       ↓
-Telnyx (outbound PSTN call)
+Twilio (outbound PSTN call)
       ↓
 xAI Direct SIP endpoint
       ↓
@@ -24,13 +24,13 @@ Insurance carrier representative
 
 ### Why No Vapi/Retell/Bland
 
-This system uses xAI's Voice Agent API directly with a Bring Your Own Trunk (BYO) SIP integration through Telnyx. This approach provides:
+This system uses xAI's Voice Agent API directly with a Bring Your Own Trunk (BYO) SIP integration through Twilio. This approach provides:
 
 - **Direct control** over call routing, prompting, and data handling
 - **No intermediary** between the law firm's data and the AI agent
 - **Full audit trail** of every instruction sent to Grok
 - **Minimal data exposure** — only explicitly approved context reaches the AI
-- **Carrier-level control** via Telnyx call control API
+- **Carrier-level control** via Twilio's programmable voice API
 - **Cost transparency** — no markup from orchestration platforms
 
 ### Services
@@ -46,8 +46,8 @@ This system uses xAI's Voice Agent API directly with a Bring Your Own Trunk (BYO
 1. User creates a Call Mission with approved context
 2. User authorizes the call
 3. Web app queues the mission and notifies the voice worker
-4. Voice worker uses Telnyx to place outbound PSTN call
-5. Telnyx bridges the call to xAI's registered SIP endpoint
+4. Voice worker uses Twilio to place outbound PSTN call
+5. Twilio bridges the call to xAI's SIP endpoint via TwiML `<Dial><Sip>`
 6. xAI sends a `realtime.call.incoming` webhook to the voice worker
 7. Voice worker extracts the `call_id` and opens a realtime WebSocket
 8. Grok is configured with mission-specific instructions and tools
@@ -60,7 +60,7 @@ This system uses xAI's Voice Agent API directly with a Bring Your Own Trunk (BYO
 
 Calls are correlated across systems using:
 - A `correlation_token` (UUID) stored on the mission
-- Passed to Telnyx via `client_state` (base64 encoded)
+- Passed to Twilio via the status callback URL query parameter (base64 encoded)
 - Used in SIP headers for xAI correlation
 - Never contains sensitive case data — only an opaque identifier
 
@@ -71,10 +71,9 @@ Calls are correlated across systems using:
 - Node.js 20+
 - pnpm 9+
 - Supabase CLI (for local development)
-- A Telnyx account with:
-  - A phone number
-  - An outbound voice profile
-  - A SIP connection
+- A Twilio account with:
+  - A phone number with voice capabilities
+  - A SIP domain configured for xAI routing
 - An xAI account with Voice Agent API access
 
 ### Installation
@@ -106,7 +105,7 @@ pnpm dev:voice  # Voice worker on port 3001
 ### Mock Mode
 
 Set `VOICE_MODE=mock` in `.env` to run without real phone calls. Mock mode:
-- Never initiates real Telnyx calls
+- Never initiates real Twilio calls
 - Simulates realistic call progression
 - Generates sample transcripts and results
 - Exercises the full review workflow
@@ -125,7 +124,7 @@ Available mock scenarios:
 10. `call_disconnected` - Mid-call disconnect
 11. `invalid_phone_number` - Bad number
 12. `xai_websocket_failure` - WebSocket error
-13. `telnyx_initiation_failure` - Telnyx API error
+13. `twilio_initiation_failure` - Twilio API error
 14. `hold_timeout` - Exceeded hold duration
 
 ## Supabase Setup
@@ -151,28 +150,25 @@ All tables use RLS. Key policies:
 - Mission creation requires an active user role
 - Review actions require case access + active role
 
-## Telnyx Setup
+## Twilio Setup
 
-1. **Create a Telnyx account** at [telnyx.com](https://telnyx.com)
-2. **Purchase a phone number** — this is your outbound caller ID
-3. **Create an Outbound Voice Profile** — configure the number
-4. **Create a SIP Connection** for xAI routing:
-   - Connection type: Credentials-based or IP-based
-   - Configure the SIP URI that xAI will use
-5. **Set webhook URL** to `{VOICE_WORKER_BASE_URL}/webhooks/telnyx/calls`
-6. **Copy these values** to your `.env`:
-   - `TELNYX_API_KEY`
-   - `TELNYX_PUBLIC_KEY` (for webhook verification)
-   - `TELNYX_CONNECTION_ID`
-   - `TELNYX_OUTBOUND_VOICE_PROFILE_ID`
-   - `TELNYX_CALLER_ID_NUMBER` (E.164 format)
-   - `TELNYX_SIP_CONNECTION_ID`
+1. **Log in to Twilio** at [twilio.com/console](https://www.twilio.com/console)
+2. **Get a phone number** with Voice capabilities — this is your outbound caller ID
+3. **Create a SIP Domain** under Programmable Voice > SIP Domains:
+   - This domain routes audio to xAI's SIP endpoint
+   - Configure authentication credentials if needed
+4. **Set webhook URL**: In your phone number's voice configuration, point to `{VOICE_WORKER_BASE_URL}/webhooks/twilio/twiml`
+5. **Copy these values** to your `.env`:
+   - `TWILIO_ACCOUNT_SID` — from the Twilio Console dashboard
+   - `TWILIO_AUTH_TOKEN` — from the Twilio Console dashboard
+   - `TWILIO_PHONE_NUMBER` — your purchased number in E.164 format
+   - `TWILIO_SIP_DOMAIN` — the SIP domain you created (e.g., `xai-bridge.sip.twilio.com`)
 
 ## xAI Voice Agent Setup
 
 1. **Get API access** to xAI's Voice Agent API
 2. **Register your SIP endpoint** (Direct SIP / BYO Trunk):
-   - Register the Telnyx SIP trunk with xAI
+   - Register the Twilio SIP domain with xAI
    - Configure the phone number or SIP route
    - Set `origin: "byo_trunk"` in your configuration
 3. **Configure the SIP webhook**:
@@ -192,7 +188,7 @@ xAI supports:
 - Bearer token authentication on the realtime WebSocket
 
 The voice worker validates:
-- Telnyx webhook signatures using the public key
+- Twilio webhook signatures using HMAC-SHA1 with your Auth Token
 - xAI SIP webhook signatures using HMAC-SHA256
 - Internal API calls using `VOICE_WORKER_INTERNAL_SECRET`
 
@@ -222,7 +218,7 @@ railway up --service voice-worker
 ```
 
 Configure environment variables:
-- All Telnyx and xAI keys
+- All Twilio and xAI keys
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
 - `VOICE_WORKER_INTERNAL_SECRET` (same as web)
 - `APP_BASE_URL` (public URL of web app)
@@ -271,7 +267,7 @@ To connect to your existing schema:
 - No recurring/scheduled calls
 - No live human transfer
 - No recording by default (compliance configuration required)
-- One telephony provider (Telnyx)
+- One telephony provider (Twilio)
 - One AI provider (xAI Grok)
 - No mobile app
 - No automatic case updates — all require human review
@@ -285,8 +281,8 @@ To connect to your existing schema:
 | Problem | Solution |
 |---------|----------|
 | No xAI webhook received | Verify SIP endpoint registration, check webhook URL is publicly accessible |
-| SIP 403 Forbidden | Check SIP authentication credentials in Telnyx connection |
-| Audio one-way | Verify SIP connection allows bidirectional media, check NAT/firewall |
+| SIP 403 Forbidden | Check SIP authentication credentials on your Twilio SIP domain |
+| Audio one-way | Verify SIP domain allows bidirectional media, check NAT/firewall |
 | Call connects but no AI speech | Verify WebSocket connects and `session.update` is sent successfully |
 
 ### WebSocket Issues
@@ -302,7 +298,7 @@ To connect to your existing schema:
 
 | Problem | Solution |
 |---------|----------|
-| Signature verification fails | Ensure `TELNYX_PUBLIC_KEY` / `XAI_SIP_WEBHOOK_SECRET` are correct |
+| Signature verification fails | Ensure `TWILIO_AUTH_TOKEN` / `XAI_SIP_WEBHOOK_SECRET` are correct |
 | Events arrive out of order | Status precedence system handles this — check logs |
 | Duplicate events | Idempotency check via `external_event_id` prevents double-processing |
 

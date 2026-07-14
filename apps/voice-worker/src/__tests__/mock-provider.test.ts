@@ -13,7 +13,7 @@ const MOCK_SCENARIOS = [
   'call_disconnected',
   'invalid_phone_number',
   'xai_websocket_failure',
-  'telnyx_initiation_failure',
+  'twilio_initiation_failure',
   'hold_timeout',
 ] as const;
 
@@ -112,8 +112,8 @@ const SCENARIO_CONFIGS: Record<MockScenario, MockScenarioConfig> = {
     generatesTranscript: false,
     generatesResults: true,
   },
-  telnyx_initiation_failure: {
-    scenario: 'telnyx_initiation_failure',
+  twilio_initiation_failure: {
+    scenario: 'twilio_initiation_failure',
     expectedOutcome: 'failure',
     expectedStatuses: ['initiating', 'failed'],
     generatesTranscript: false,

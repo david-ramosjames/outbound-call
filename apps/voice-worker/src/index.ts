@@ -1,7 +1,7 @@
 import express, { type Request, type Response, type NextFunction, type Express } from 'express';
 import { config } from './config.js';
 import { logger } from './utils/logger.js';
-import { telnyxRouter } from './webhooks/telnyx.js';
+import { twilioRouter } from './webhooks/twilio.js';
 import { xaiRouter } from './webhooks/xai.js';
 import { internalRouter } from './routes/internal.js';
 
@@ -35,7 +35,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Routes
-app.use(telnyxRouter);
+app.use(twilioRouter);
 app.use(xaiRouter);
 app.use(internalRouter);
 

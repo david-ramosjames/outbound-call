@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const callSessionSchema = z.object({
   id: z.string().uuid(),
   callMissionId: z.string().uuid(),
-  provider: z.enum(['telnyx', 'xai', 'mock']),
+  provider: z.enum(['telnyx', 'twilio', 'xai', 'mock']),
   telnyxCallControlId: z.string().nullable(),
   telnyxCallSessionId: z.string().nullable(),
   telnyxCallLegId: z.string().nullable(),

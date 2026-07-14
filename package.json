@@ -1,0 +1,28 @@
+{
+  "name": "outbound-call",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "db:migrate": "supabase migration up",
+    "db:reset": "supabase db reset",
+    "dev:web": "turbo dev --filter=@outbound-call/web",
+    "dev:voice": "turbo dev --filter=@outbound-call/voice-worker",
+    "build:web": "turbo build --filter=@outbound-call/web",
+    "build:voice": "turbo build --filter=@outbound-call/voice-worker"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

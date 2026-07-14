@@ -1,0 +1,82 @@
+import { z } from 'zod';
+import { MISSION_TYPES } from '../types/mission-types';
+
+export const missionTemplateSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  missionType: z.enum(MISSION_TYPES),
+  description: z.string(),
+  defaultGoal: z.string(),
+  defaultObjectives: z.array(z.string()),
+  defaultSuccessCriteria: z.array(z.string()),
+  defaultAllowedDisclosures: z.array(z.string()),
+  defaultRestrictedTopics: z.array(z.string()),
+  defaultEscalationRules: z.array(z.string()),
+  expectedOutputSchema: z.record(z.unknown()).nullable(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type MissionTemplate = z.infer<typeof missionTemplateSchema>;
+
+export const OPEN_INSURANCE_CLAIM_TEMPLATE = {
+  name: 'Open Insurance Claim',
+  missionType: 'open_insurance_claim' as const,
+  description: 'Open a new bodily-injury insurance claim on behalf of the law firm\'s client and collect the resulting claim and adjuster information.',
+  defaultGoal: 'Open a new bodily-injury insurance claim on behalf of the law firm\'s client and collect the resulting claim and adjuster information.',
+  defaultObjectives: [
+    'Reach the correct claims department',
+    'Explain that the firm represents the client',
+    'Provide approved administrative information',
+    'Open the claim',
+    'Obtain the claim number',
+    'Obtain the adjuster\'s name, if assigned',
+    'Obtain the adjuster\'s phone number',
+    'Obtain the adjuster\'s email address',
+    'Obtain a fax number or mailing address if relevant',
+    'Identify any requested documentation',
+    'Identify any missing information preventing completion',
+    'Identify the next step',
+    'Identify a reasonable follow-up date',
+  ],
+  defaultSuccessCriteria: [
+    'The claim is confirmed as opened',
+    'A claim number is obtained',
+  ],
+  defaultAllowedDisclosures: [
+    'Law firm name and contact information',
+    'Attorney name',
+    'Client name',
+    'Date of loss',
+    'Policy number when available',
+    'Basic incident description',
+    'Representation status',
+  ],
+  defaultRestrictedTopics: [
+    'Settlement value or negotiation',
+    'Liability admissions',
+    'Detailed medical information',
+    'Legal strategy',
+    'Client statements',
+    'Social security numbers',
+    'Banking or payment information',
+    'Unrelated case information',
+  ],
+  defaultEscalationRules: [
+    'Legal advice or judgment is requested',
+    'The representative requests a client statement',
+    'The representative requests an attorney statement',
+    'Settlement value is discussed',
+    'Liability admissions are requested',
+    'The AI is asked to verify identity using unavailable or restricted data',
+    'A dispute develops',
+    'Sensitive information outside the approved context is requested',
+    'A representative refuses to speak with an AI',
+    'The representative requests a human',
+    'The AI is not confident it has the correct answer',
+    'The requested action exceeds the defined mission',
+  ],
+  expectedOutputSchema: null,
+  isActive: true,
+} as const;

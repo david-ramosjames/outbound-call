@@ -15,12 +15,10 @@ twilioRouter.post(
 
     logger.info('TwiML requested for SIP bridge', { missionId });
 
-    const sipUri = `sip:${config.XAI_SIP_PHONE_NUMBER_ID}@${config.TWILIO_SIP_DOMAIN}`;
-
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial>
-    <Sip>${sipUri}</Sip>
+    <Sip>${config.XAI_SIP_URI}</Sip>
   </Dial>
 </Response>`;
 

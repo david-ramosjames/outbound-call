@@ -66,7 +66,7 @@ export class XaiVoiceSession {
       updatedAt: '',
     };
 
-    const wsUrl = config.XAI_REALTIME_URL;
+    const wsUrl = `${config.XAI_REALTIME_URL}?agent_id=${config.XAI_AGENT_ID}`;
 
     this.ws = new WebSocket(wsUrl, {
       headers: {

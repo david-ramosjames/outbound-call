@@ -1,19 +1,21 @@
 import { z } from 'zod';
 import 'dotenv/config';
 
+const isMock = process.env.VOICE_MODE !== 'live';
+
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
-  XAI_API_KEY: z.string().min(1),
-  XAI_AGENT_ID: z.string().min(1),
-  XAI_SIP_URI: z.string().min(1),
-  XAI_SIP_WEBHOOK_SECRET: z.string().min(1),
+  XAI_API_KEY: isMock ? z.string().default('mock-xai-key') : z.string().min(1),
+  XAI_AGENT_ID: isMock ? z.string().default('mock-agent-id') : z.string().min(1),
+  XAI_SIP_URI: isMock ? z.string().default('sip:mock@localhost') : z.string().min(1),
+  XAI_SIP_WEBHOOK_SECRET: isMock ? z.string().default('mock-webhook-secret') : z.string().min(1),
   XAI_REALTIME_URL: z.string().url().default('wss://api.x.ai/v1/realtime'),
 
-  TWILIO_ACCOUNT_SID: z.string().min(1),
-  TWILIO_AUTH_TOKEN: z.string().min(1),
-  TWILIO_PHONE_NUMBER: z.string().min(1),
+  TWILIO_ACCOUNT_SID: isMock ? z.string().default('mock-twilio-sid') : z.string().min(1),
+  TWILIO_AUTH_TOKEN: isMock ? z.string().default('mock-twilio-token') : z.string().min(1),
+  TWILIO_PHONE_NUMBER: isMock ? z.string().default('+10000000000') : z.string().min(1),
 
   VOICE_MODE: z.enum(['mock', 'live']).default('mock'),
   VOICE_WORKER_INTERNAL_SECRET: z.string().min(1),

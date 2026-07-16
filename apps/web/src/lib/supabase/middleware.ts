@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
+import { isAllowedEmail } from '@/lib/auth/allowed-email-domain';
 
 interface CookieToSet {
   name: string;
@@ -34,6 +35,14 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (user && !isAllowedEmail(user.email)) {
+    await supabase.auth.signOut();
+    const url = request.nextUrl.clone();
+    url.pathname = '/login';
+    url.searchParams.set('error', 'unauthorized_domain');
+    return NextResponse.redirect(url);
+  }
 
   if (
     !user &&

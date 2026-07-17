@@ -11,6 +11,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Ensure RLS helpers see an active role for this Google user
+  const { error: roleError } = await supabase.rpc('ensure_user_role');
+  if (roleError) {
+    console.error('[launch] ensure_user_role failed', roleError);
+  }
+
   const permitted = await canLaunchCalls(user.id);
   if (!permitted) {
     return NextResponse.json(
@@ -29,6 +35,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (!instructions?.goal) {
+    return NextResponse.json(
+      { error: 'Mission goal is required' },
+      { status: 400 },
+    );
+  }
+
   const normalizedPhone = normalizePhoneNumber(destination.phoneNumber);
   if (!isValidE164(normalizedPhone)) {
     return NextResponse.json(
@@ -41,7 +54,7 @@ export async function POST(request: NextRequest) {
     .from('blocked_phone_numbers')
     .select('id')
     .eq('phone_number', normalizedPhone)
-    .single();
+    .maybeSingle();
 
   if (blocked) {
     return NextResponse.json(
@@ -54,27 +67,38 @@ export async function POST(request: NextRequest) {
     .from('voice_settings')
     .select('*')
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (voiceSettings && !voiceSettings.is_enabled) {
+  if (voiceSettings && voiceSettings.is_enabled === false) {
     return NextResponse.json(
       { error: 'AI calling is currently disabled' },
       { status: 400 },
     );
   }
 
+  const voiceMode = process.env.VOICE_MODE ?? process.env.NEXT_PUBLIC_VOICE_MODE ?? 'mock';
   const startTime = voiceSettings?.allowed_call_start_time ?? '09:00';
   const endTime = voiceSettings?.allowed_call_end_time ?? '17:00';
   const destTimezone = destination.destinationTimezone ?? 'America/Chicago';
 
-  if (!isWithinCallingHours(destTimezone, startTime, endTime)) {
+  // Enforce calling hours only in live mode so mock testing works anytime
+  if (
+    voiceMode === 'live' &&
+    !isWithinCallingHours(destTimezone, startTime, endTime)
+  ) {
     return NextResponse.json(
       { error: 'Outside allowed calling hours for the destination time zone' },
       { status: 400 },
     );
   }
 
-  const approvedContext = (contextFields ?? []).map((f: { field: string; label: string; value: string; included: boolean; missionSpecificValue?: string }) => ({
+  const approvedContext = (contextFields ?? []).map((f: {
+    field: string;
+    label: string;
+    value: string;
+    included: boolean;
+    missionSpecificValue?: string;
+  }) => ({
     field: f.field,
     label: f.label,
     value: f.missionSpecificValue || f.value,
@@ -87,7 +111,7 @@ export async function POST(request: NextRequest) {
     authorizedAt: new Date().toISOString(),
     approvedContext,
     destination: { ...destination, phoneNumber: normalizedPhone },
-    voiceMode: process.env.VOICE_MODE ?? 'mock',
+    voiceMode,
   };
 
   const { data: mission, error: insertError } = await supabase
@@ -119,8 +143,24 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (insertError || !mission) {
+    console.error('[launch] call_missions insert failed', {
+      message: insertError?.message,
+      code: insertError?.code,
+      details: insertError?.details,
+      hint: insertError?.hint,
+      caseId,
+      userId: user.id,
+    });
+
     return NextResponse.json(
-      { error: 'Failed to create call mission' },
+      {
+        error: insertError?.message
+          ? `Failed to create call mission: ${insertError.message}`
+          : 'Failed to create call mission',
+        code: insertError?.code,
+        details: insertError?.details,
+        hint: insertError?.hint,
+      },
       { status: 500 },
     );
   }
@@ -130,7 +170,7 @@ export async function POST(request: NextRequest) {
 
   if (workerUrl && workerSecret) {
     try {
-      await fetch(`${workerUrl}/internal/launch-call`, {
+      const workerRes = await fetch(`${workerUrl}/internal/launch-call`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -138,7 +178,17 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({ missionId: mission.id }),
       });
+
+      if (!workerRes.ok) {
+        const workerBody = await workerRes.text();
+        console.error('[launch] voice worker rejected launch', {
+          status: workerRes.status,
+          body: workerBody,
+          missionId: mission.id,
+        });
+      }
     } catch (err) {
+      console.error('[launch] voice worker unreachable', err);
       await supabase
         .from('call_missions')
         .update({ status: 'failed', failure_reason: 'Failed to reach voice worker' })
@@ -149,6 +199,8 @@ export async function POST(request: NextRequest) {
         { status: 502 },
       );
     }
+  } else {
+    console.warn('[launch] VOICE_WORKER_BASE_URL or VOICE_WORKER_INTERNAL_SECRET not set; mission queued without worker notify');
   }
 
   return NextResponse.json({ missionId: mission.id, status: 'queued' });

@@ -29,5 +29,11 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${appUrl}/login?error=unauthorized_domain`);
   }
 
+  // Grant firm role so call_missions RLS allows creating missions
+  const { error: roleError } = await supabase.rpc('ensure_user_role');
+  if (roleError) {
+    console.error('[auth/callback] ensure_user_role failed', roleError);
+  }
+
   return NextResponse.redirect(`${appUrl}${next}`);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidE164, isValidUSPhone, normalizePhoneNumber } from '../utils/phone-validation';
+import { isValidE164, isValidUSPhone, normalizePhoneNumber } from '../utils/phone-validation.js';
 
 describe('isValidE164', () => {
   it('accepts valid E.164 numbers', () => {

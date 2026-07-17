@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canTransitionStatus, isTerminalStatus, isActiveStatus } from '../utils/status-precedence';
+import { canTransitionStatus, isTerminalStatus, isActiveStatus } from '../utils/status-precedence.js';
 
 describe('canTransitionStatus', () => {
   it('allows forward transitions', () => {

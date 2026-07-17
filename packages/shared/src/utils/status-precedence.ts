@@ -1,4 +1,4 @@
-import { CallStatus } from '../types/call-status';
+import { CallStatus } from '../types/call-status.js';
 
 const STATUS_PRECEDENCE: Record<CallStatus, number> = {
   draft: 0,

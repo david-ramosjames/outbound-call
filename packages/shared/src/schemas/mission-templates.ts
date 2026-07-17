@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MISSION_TYPES } from '../types/mission-types';
+import { MISSION_TYPES } from '../types/mission-types.js';
 
 export const missionTemplateSchema = z.object({
   id: z.string().uuid(),

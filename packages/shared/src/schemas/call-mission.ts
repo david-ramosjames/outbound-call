@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { CALL_STATUSES, MISSION_OUTCOMES } from '../types/call-status';
-import { MISSION_TYPES } from '../types/mission-types';
+import { CALL_STATUSES, MISSION_OUTCOMES } from '../types/call-status.js';
+import { MISSION_TYPES } from '../types/mission-types.js';
 
 export const destinationSchema = z.object({
   organizationName: z.string().min(1, 'Organization name is required'),

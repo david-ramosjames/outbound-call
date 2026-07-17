@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SPEAKERS } from '../types/speakers';
+import { SPEAKERS } from '../types/speakers.js';
 
 export const transcriptSegmentSchema = z.object({
   id: z.string().uuid(),

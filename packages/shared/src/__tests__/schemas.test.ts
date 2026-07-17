@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createCallMissionSchema, destinationSchema } from '../schemas/call-mission';
-import { structuredResultSchema } from '../schemas/call-results';
+import { createCallMissionSchema, destinationSchema } from '../schemas/call-mission.js';
+import { structuredResultSchema } from '../schemas/call-results.js';
 
 describe('destinationSchema', () => {
   it('validates a valid destination', () => {

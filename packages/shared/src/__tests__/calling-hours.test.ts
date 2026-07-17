@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isWithinCallingHours } from '../utils/calling-hours';
+import { isWithinCallingHours } from '../utils/calling-hours.js';
 
 describe('isWithinCallingHours', () => {
   it('returns false for invalid timezone', () => {

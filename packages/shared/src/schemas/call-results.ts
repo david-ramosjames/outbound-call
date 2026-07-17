@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MISSION_OUTCOMES, REVIEW_STATUSES } from '../types/call-status';
+import { MISSION_OUTCOMES, REVIEW_STATUSES } from '../types/call-status.js';
 
 export const structuredResultSchema = z.object({
   missionOutcome: z.enum(MISSION_OUTCOMES),

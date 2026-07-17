@@ -37,9 +37,15 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
         </Link>
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            {caseData?.title ?? 'Case Details'}
+            {caseData?.case_number?.trim() ||
+              caseData?.name?.trim() ||
+              'Case Details'}
           </h1>
-          <p className="text-sm text-slate-500">Case ID: {caseId}</p>
+          <p className="text-sm text-slate-500">
+            {caseData?.client_name
+              ? `${caseData.client_name}${caseData.case_type ? ` · ${caseData.case_type}` : ''}`
+              : caseData?.case_type ?? 'Case details'}
+          </p>
         </div>
       </div>
 
@@ -52,6 +58,12 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             <CardContent>
               {caseData ? (
                 <dl className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <dt className="text-slate-500">Case Number</dt>
+                    <dd className="font-medium mt-0.5">
+                      {caseData.case_number?.trim() || '—'}
+                    </dd>
+                  </div>
                   <div>
                     <dt className="text-slate-500">Status</dt>
                     <dd className="font-medium mt-0.5">

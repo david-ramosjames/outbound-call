@@ -14,11 +14,12 @@ const launchCallBodySchema = z.object({
 internalRouter.post(
   '/internal/launch-call',
   async (req: Request, res: Response): Promise<void> => {
-    // Authenticate with internal secret
+    // Authenticate with internal secret (accept either header name)
     const authHeader =
-      req.headers['x-voice-worker-secret'] as string | undefined;
+      (req.headers['x-internal-secret'] as string | undefined) ??
+      (req.headers['x-voice-worker-secret'] as string | undefined);
 
-    if (authHeader !== config.VOICE_WORKER_INTERNAL_SECRET) {
+    if (!authHeader || authHeader !== config.VOICE_WORKER_INTERNAL_SECRET) {
       logger.warn('Unauthorized internal request');
       res.status(401).json({ error: 'Unauthorized' });
       return;

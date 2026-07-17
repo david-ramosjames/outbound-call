@@ -1,15 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { getAppUrl } from '@/lib/app-url';
 import {
   ALLOWED_EMAIL_DOMAIN,
-  isAllowedEmail,
   UNAUTHORIZED_DOMAIN_MESSAGE,
 } from '@/lib/auth/allowed-email-domain';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Scale } from 'lucide-react';
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -41,11 +39,7 @@ function GoogleIcon() {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
@@ -64,7 +58,7 @@ export default function LoginPage() {
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${getAppUrl()}/auth/callback`,
         queryParams: {
           hd: ALLOWED_EMAIL_DOMAIN,
         },
@@ -75,33 +69,6 @@ export default function LoginPage() {
       setError(authError.message);
       setGoogleLoading(false);
     }
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!isAllowedEmail(email)) {
-      setError(UNAUTHORIZED_DOMAIN_MESSAGE);
-      return;
-    }
-
-    setLoading(true);
-
-    const supabase = createClient();
-    const { error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (authError) {
-      setError(authError.message);
-      setLoading(false);
-      return;
-    }
-
-    router.push('/cases');
-    router.refresh();
   };
 
   return (
@@ -131,47 +98,12 @@ export default function LoginPage() {
             type="button"
             variant="outline"
             className="w-full gap-2"
-            disabled={googleLoading || loading}
+            disabled={googleLoading}
             onClick={handleGoogleLogin}
           >
             <GoogleIcon />
             {googleLoading ? 'Redirecting...' : 'Continue with Google'}
           </Button>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-slate-200" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-slate-400">or</span>
-            </div>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <Input
-              id="email"
-              label="Email"
-              type="email"
-              placeholder={`you@${ALLOWED_EMAIL_DOMAIN}`}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-
-            <Input
-              id="password"
-              label="Password"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-
-            <Button type="submit" className="w-full" disabled={loading || googleLoading}>
-              {loading ? 'Signing in...' : 'Sign In with Email'}
-            </Button>
-          </form>
         </div>
       </div>
     </div>

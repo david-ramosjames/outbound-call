@@ -34,6 +34,7 @@ const FIELD_LABELS: Record<string, string> = {
   client_date_of_birth: 'Client Date of Birth',
   client_address: 'Client Address',
   client_phone_number: 'Client Phone Number',
+  injuries: 'Injuries',
   date_of_loss: 'Date of Loss',
   time_of_loss: 'Time of Loss',
   location_of_loss: 'Location of Loss',
@@ -105,20 +106,47 @@ export default function NewCallPage() {
 
   const loadCaseData = useCallback(async () => {
     const supabase = createClient();
-    const { data } = await supabase
-      .from('cases')
-      .select('*')
-      .eq('id', caseId)
-      .single();
 
-    if (data) {
-      setContextFields((prev) =>
-        prev.map((f) => ({
-          ...f,
-          value: data[f.field] ? String(data[f.field]) : '',
-        })),
-      );
-    }
+    const [{ data: caseData }, { data: trackerData }] = await Promise.all([
+      supabase.from('cases').select('*').eq('id', caseId).single(),
+      supabase
+        .from('case_tracker_entries')
+        .select('injuries, case_description, attorney_name, client_phone')
+        .eq('case_id', caseId)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    if (!caseData) return;
+
+    const clientFullName =
+      caseData.client_name ||
+      [caseData.client_first_name, caseData.client_last_name]
+        .filter(Boolean)
+        .join(' ');
+
+    // Map approved-context fields to actual Case Tracker columns
+    const mappedValues: Record<string, string | null | undefined> = {
+      client_full_name: clientFullName,
+      client_date_of_birth: caseData.date_of_birth,
+      client_phone_number: trackerData?.client_phone || caseData.client_phone,
+      date_of_loss: caseData.date_of_incident,
+      case_type: caseData.case_type,
+      brief_incident_description: trackerData?.case_description ?? caseData.notes,
+      injuries: trackerData?.injuries,
+      attorney_name: trackerData?.attorney_name,
+      law_firm_name: 'Ramos James Law',
+    };
+
+    setContextFields((prev) =>
+      prev.map((f) => {
+        const mapped = mappedValues[f.field];
+        const direct = caseData[f.field];
+        const value = mapped ?? direct;
+        return { ...f, value: value ? String(value) : '' };
+      }),
+    );
   }, [caseId]);
 
   useEffect(() => {

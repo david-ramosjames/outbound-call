@@ -6,22 +6,23 @@ export type MissionType = (typeof MISSION_TYPES)[number];
 
 export const APPROVED_CONTEXT_FIELDS = [
   'client_full_name',
-  'client_date_of_birth',
   'client_address',
+  'vehicle_year',
+  'vehicle_make',
+  'vehicle_model',
+  'vehicle_identification_number',
+  'policy_number',
+  'insurance_carrier',
+  'insured_name',
+  'injuries',
+  'client_date_of_birth',
   'client_phone_number',
   'date_of_loss',
   'time_of_loss',
   'location_of_loss',
   'case_type',
   'brief_incident_description',
-  'insured_name',
-  'insurance_carrier',
-  'policy_number',
   'existing_claim_number',
-  'vehicle_year',
-  'vehicle_make',
-  'vehicle_model',
-  'vehicle_identification_number',
   'police_report_number',
   'attorney_name',
   'law_firm_name',
@@ -33,6 +34,20 @@ export const APPROVED_CONTEXT_FIELDS = [
 ] as const;
 
 export type ApprovedContextField = (typeof APPROVED_CONTEXT_FIELDS)[number];
+
+// Core fields needed to open a claim and follow up; shown first in the UI
+export const PRIMARY_CONTEXT_FIELDS: readonly ApprovedContextField[] = [
+  'client_full_name',
+  'client_address',
+  'vehicle_year',
+  'vehicle_make',
+  'vehicle_model',
+  'vehicle_identification_number',
+  'policy_number',
+  'insurance_carrier',
+  'insured_name',
+  'injuries',
+] as const;
 
 export const RESTRICTED_FIELDS = [
   'social_security_number',

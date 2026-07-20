@@ -66,7 +66,17 @@ export class XaiVoiceSession {
       updatedAt: '',
     };
 
-    const wsUrl = `${config.XAI_REALTIME_URL}?agent_id=${config.XAI_AGENT_ID}`;
+    // SIP calls must join with call_id from realtime.call.incoming.
+    // Direct (non-SIP) sessions can still use agent_id.
+    const isSipCall = Boolean(callId) && callId !== this.missionId;
+    const wsUrl = isSipCall
+      ? `${config.XAI_REALTIME_URL}?call_id=${encodeURIComponent(callId)}`
+      : `${config.XAI_REALTIME_URL}?agent_id=${encodeURIComponent(config.XAI_AGENT_ID)}`;
+
+    logger.info('xAI WebSocket URL mode', {
+      ...logCtx,
+      mode: isSipCall ? 'sip_call_id' : 'agent_id',
+    });
 
     this.ws = new WebSocket(wsUrl, {
       headers: {
@@ -80,7 +90,10 @@ export class XaiVoiceSession {
       logger.info('xAI WebSocket connected', logCtx);
 
       this.updateSessionStatus('connected');
-      this.emitCallEvent('xai_websocket_connected', {});
+      this.emitCallEvent('xai_websocket_connected', {
+        mode: isSipCall ? 'sip_call_id' : 'agent_id',
+        xaiCallId: callId,
+      });
 
       this.sendSessionUpdate(mission, vs);
       this.sendInitialGreeting();
@@ -126,12 +139,16 @@ export class XaiVoiceSession {
       logger.info('xAI WebSocket closed', {
         ...logCtx,
         status: `${code}`,
+        reason: reason.toString(),
       });
 
       if (this.maxDurationTimer) {
         clearTimeout(this.maxDurationTimer);
         this.maxDurationTimer = null;
       }
+
+      // Flush any in-flight AI transcript before teardown
+      void this.flushPendingTranscript('websocket_closed');
 
       this.updateSessionStatus('disconnected');
       this.emitCallEvent('websocket_disconnected', {
@@ -165,6 +182,7 @@ export class XaiVoiceSession {
         instructions: prompt,
         tools: getToolDefinitions(),
         voice: voiceSettings.defaultVoice,
+        turn_detection: { type: 'server_vad' },
         input_audio_transcription: {
           model: 'grok-2-audio',
         },
@@ -237,9 +255,18 @@ export class XaiVoiceSession {
         this.emitCallEvent('representative_speech_ended', {});
         break;
 
+      case 'response.output_audio_transcript.delta':
+        this.handleTranscriptDelta(event);
+        break;
+
+      case 'response.output_audio_transcript.done':
+        await this.handleTranscriptDone(event);
+        break;
+
       default:
-        logger.debug(`Unhandled xAI event: ${type}`, {
+        logger.info(`Unhandled xAI event: ${type}`, {
           missionId: this.missionId,
+          eventType: type,
         });
     }
   }
@@ -384,11 +411,35 @@ export class XaiVoiceSession {
       this.maxDurationTimer = null;
     }
 
+    await this.flushPendingTranscript(reason ?? 'session_ended');
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, reason ?? 'session_ended');
     }
 
     await this.onSessionEnded();
+  }
+
+  private async flushPendingTranscript(reason: string): Promise<void> {
+    const pending = this.currentTranscript?.text?.trim();
+    if (!pending) {
+      this.currentTranscript = null;
+      return;
+    }
+
+    const seq = ++this.transcriptSeq;
+    const startMs = this.currentTranscript?.startTimeMs ?? 0;
+    const endMs = Date.now() - this.sessionStartMs;
+
+    logger.warn('Flushing incomplete AI transcript on disconnect', {
+      missionId: this.missionId,
+      callSessionId: this.callSessionId,
+      reason,
+      chars: pending.length,
+    });
+
+    await this.saveTranscriptSegment('ai_agent', pending, seq, startMs, endMs);
+    this.currentTranscript = null;
   }
 
   private async onSessionEnded(): Promise<void> {
@@ -450,9 +501,24 @@ export class XaiVoiceSession {
     if (error) {
       logger.error('Failed to save transcript segment', {
         missionId: this.missionId,
-        error,
+        callSessionId: this.callSessionId,
+        speaker,
+        sequenceNumber: seq,
+        errorMessage: error.message,
+        errorCode: error.code,
+        errorDetails: error.details,
+        errorHint: error.hint,
       });
+      return;
     }
+
+    logger.info('Saved transcript segment', {
+      missionId: this.missionId,
+      callSessionId: this.callSessionId,
+      speaker,
+      sequenceNumber: seq,
+      chars: text.length,
+    });
   }
 
   private async updateSessionStatus(status: string): Promise<void> {

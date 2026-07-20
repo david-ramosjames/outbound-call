@@ -3,28 +3,55 @@ import type { Router as RouterType } from 'express';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { supabase } from '../lib/supabase.js';
 import { handleTwilioWebhook } from '../services/twilio-webhook-handler.js';
 
 export const twilioRouter: RouterType = Router();
 
-// TwiML endpoint: instructs Twilio to bridge the call to xAI's SIP endpoint
+// TwiML endpoint: instructs Twilio to bridge the answered call to xAI's SIP endpoint
 twilioRouter.post(
   '/webhooks/twilio/twiml',
-  (req: Request, res: Response): void => {
-    const missionId = req.query.missionId as string;
+  async (req: Request, res: Response): Promise<void> => {
+    const missionId = (req.query.missionId as string) || '';
 
     logger.info('TwiML requested for SIP bridge', { missionId });
 
+    let correlationToken = missionId;
+    if (missionId) {
+      const { data: mission } = await supabase
+        .from('call_missions')
+        .select('correlation_token, id')
+        .eq('id', missionId)
+        .maybeSingle();
+
+      correlationToken = mission?.correlation_token || missionId;
+    }
+
+    // Custom SIP headers let the xAI realtime.call.incoming webhook
+    // correlate back to this mission.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial>
-    <Sip>${config.XAI_SIP_URI}</Sip>
+    <Sip>
+      ${config.XAI_SIP_URI}
+      <Header name="X-Correlation-Token" value="${escapeXml(correlationToken)}" />
+      <Header name="X-Mission-Id" value="${escapeXml(missionId)}" />
+    </Sip>
   </Dial>
 </Response>`;
 
     res.status(200).set('Content-Type', 'text/xml').send(twiml);
   }
 );
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
 
 function validateTwilioSignature(req: Request): boolean {
   const signature = req.headers['x-twilio-signature'] as string;

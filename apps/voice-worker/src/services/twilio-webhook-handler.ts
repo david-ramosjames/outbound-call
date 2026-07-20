@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
 import { canTransitionStatus } from '@outbound-call/shared';
 import type { CallStatus } from '@outbound-call/shared';
-import { XaiVoiceSession } from './xai-voice-session.js';
 
 interface TwilioStatusCallback {
   CallSid: string;
@@ -153,9 +152,14 @@ export async function handleTwilioWebhook(
         .from('call_missions')
         .update({ answered_at: new Date().toISOString() })
         .eq('id', missionId);
-      // Bridge to xAI once answered
-      await bridgeToXai(missionId, callSessionId!);
-      return generateSipBridgeTwiml();
+      // Audio is bridged to xAI via TwiML <Dial><Sip>. The voice session
+      // starts when xAI posts realtime.call.incoming — do not open a
+      // premature agent_id WebSocket here.
+      await transitionMissionStatus(missionId, 'answered', {
+        missionId,
+        callSessionId,
+      });
+      break;
 
     case 'completed':
       await handleCompleted(missionId, callSessionId!, params);
@@ -168,11 +172,6 @@ export async function handleTwilioWebhook(
       break;
   }
 
-  return '';
-}
-
-function generateSipBridgeTwiml(): string {
-  // Return empty — the TwiML is set at call creation time via the `url` parameter
   return '';
 }
 
@@ -204,41 +203,6 @@ async function transitionMissionStatus(
     .eq('id', missionId);
 
   logger.info(`Mission status -> ${newStatus}`, logCtx);
-}
-
-async function bridgeToXai(
-  missionId: string,
-  callSessionId: string
-): Promise<void> {
-  logger.info('Initiating xAI SIP bridge', { missionId, callSessionId });
-
-  try {
-    const { data: mission } = await supabase
-      .from('call_missions')
-      .select('*')
-      .eq('id', missionId)
-      .single();
-
-    if (!mission) {
-      logger.error('Mission not found for xAI bridge', { missionId });
-      return;
-    }
-
-    await transitionMissionStatus(missionId, 'in_progress', {
-      missionId,
-      callSessionId,
-    });
-
-    const session = new XaiVoiceSession(missionId, callSessionId);
-    await session.connect(missionId, mission);
-  } catch (err) {
-    logger.error('Failed to bridge to xAI', {
-      missionId,
-      callSessionId,
-      error: err,
-      errorCategory: 'xai_bridge',
-    });
-  }
 }
 
 async function handleCompleted(

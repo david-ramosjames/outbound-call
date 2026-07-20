@@ -1,34 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
-import { APPROVED_CONTEXT_FIELDS } from '@outbound-call/shared';
+import {
+  APPROVED_CONTEXT_FIELDS,
+  CONTEXT_FIELD_LABELS,
+} from '@outbound-call/shared';
 import type { ApprovedContextEntry } from '@outbound-call/shared';
-
-const FIELD_LABELS: Record<string, string> = {
-  client_full_name: 'Client Full Name',
-  client_date_of_birth: 'Client Date of Birth',
-  client_address: 'Client Address',
-  client_phone_number: 'Client Phone Number',
-  date_of_loss: 'Date of Loss',
-  time_of_loss: 'Time of Loss',
-  location_of_loss: 'Location of Loss',
-  case_type: 'Case Type',
-  brief_incident_description: 'Brief Incident Description',
-  insured_name: 'Insured Name',
-  insurance_carrier: 'Insurance Carrier',
-  policy_number: 'Policy Number',
-  existing_claim_number: 'Existing Claim Number',
-  vehicle_year: 'Vehicle Year',
-  vehicle_make: 'Vehicle Make',
-  vehicle_model: 'Vehicle Model',
-  vehicle_identification_number: 'VIN',
-  police_report_number: 'Police Report Number',
-  attorney_name: 'Attorney Name',
-  law_firm_name: 'Law Firm Name',
-  law_firm_phone_number: 'Law Firm Phone',
-  law_firm_email_address: 'Law Firm Email',
-  law_firm_mailing_address: 'Law Firm Address',
-  representation_status: 'Representation Status',
-  other_approved_notes: 'Other Approved Notes',
-};
 
 export interface CaseDataAdapter {
   getSuggestedCallContext(caseId: string, userId: string): Promise<ApprovedContextEntry[]>;
@@ -56,10 +31,25 @@ export class SupabaseCaseDataAdapter implements CaseDataAdapter {
       .eq('id', caseId)
       .single();
 
+    const clientFullName =
+      caseData?.client_name ||
+      [caseData?.client_first_name, caseData?.client_last_name]
+        .filter(Boolean)
+        .join(' ');
+
+    const mapped: Record<string, string | undefined> = {
+      client_full_name: clientFullName || undefined,
+      client_date_of_birth: caseData?.date_of_birth || undefined,
+      client_phone_number: caseData?.client_phone || undefined,
+      date_of_loss: caseData?.date_of_incident || undefined,
+      case_type: caseData?.case_type || undefined,
+      law_firm_name: 'Ramos James Law',
+    };
+
     return APPROVED_CONTEXT_FIELDS.map((field) => ({
       field,
-      label: FIELD_LABELS[field] ?? field.replace(/_/g, ' '),
-      value: caseData?.[field] ? String(caseData[field]) : '',
+      label: CONTEXT_FIELD_LABELS[field],
+      value: mapped[field] ?? (caseData?.[field] ? String(caseData[field]) : ''),
       included: false,
     }));
   }

@@ -1,7 +1,12 @@
 'use client';
 
 import { Input } from '@/components/ui/input';
-import type { Destination } from '@outbound-call/shared';
+import {
+  MISSION_TYPES,
+  MISSION_TYPE_LABELS,
+  MISSION_TEMPLATES_BY_TYPE,
+} from '@outbound-call/shared';
+import type { Destination, MissionType } from '@outbound-call/shared';
 
 const TIMEZONES = [
   'America/New_York',
@@ -14,25 +19,65 @@ const TIMEZONES = [
 
 interface DestinationStepProps {
   data: Partial<Destination>;
+  missionType: MissionType;
   errors: Record<string, string>;
   onChange: (field: keyof Destination, value: string) => void;
+  onMissionTypeChange: (missionType: MissionType) => void;
 }
 
-export function DestinationStep({ data, errors, onChange }: DestinationStepProps) {
+export function DestinationStep({
+  data,
+  missionType,
+  errors,
+  onChange,
+  onMissionTypeChange,
+}: DestinationStepProps) {
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">Destination</h2>
         <p className="text-sm text-slate-500 mt-1">
-          Who will the AI agent call? Provide the organization and phone number.
+          Choose the call purpose, then who to dial. Purpose controls which facts
+          are pre-selected and the default script goals.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-slate-700">
+          Call purpose *
+        </label>
+        <div className="grid gap-2">
+          {MISSION_TYPES.map((type) => {
+            const template = MISSION_TEMPLATES_BY_TYPE[type];
+            const selected = missionType === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => onMissionTypeChange(type)}
+                className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                  selected
+                    ? 'border-navy-300 bg-navy-50'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <div className="text-sm font-medium text-slate-900">
+                  {MISSION_TYPE_LABELS[type]}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {template.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Input
           id="organizationName"
           label="Organization Name *"
-          placeholder="e.g. State Farm Insurance"
+          placeholder="e.g. GEICO, State Farm, USAA"
           value={data.organizationName ?? ''}
           onChange={(e) => onChange('organizationName', e.target.value)}
           error={errors.organizationName}
@@ -40,7 +85,7 @@ export function DestinationStep({ data, errors, onChange }: DestinationStepProps
         <Input
           id="department"
           label="Department"
-          placeholder="e.g. Claims Department"
+          placeholder="e.g. Claims / Total Loss / PIP"
           value={data.department ?? ''}
           onChange={(e) => onChange('department', e.target.value)}
         />
@@ -49,7 +94,7 @@ export function DestinationStep({ data, errors, onChange }: DestinationStepProps
       <Input
         id="contactName"
         label="Contact Name"
-        placeholder="e.g. John Smith (if known)"
+        placeholder="e.g. Will Holman (if known)"
         value={data.contactName ?? ''}
         onChange={(e) => onChange('contactName', e.target.value)}
       />
@@ -63,13 +108,13 @@ export function DestinationStep({ data, errors, onChange }: DestinationStepProps
             value={data.phoneNumber ?? ''}
             onChange={(e) => onChange('phoneNumber', e.target.value)}
             error={errors.phoneNumber}
-            hint="US phone number in any format"
+            hint="Main claims line or direct adjuster number"
           />
         </div>
         <Input
           id="extension"
           label="Extension"
-          placeholder="ext. 1234"
+          placeholder="e.g. 79848"
           value={data.extension ?? ''}
           onChange={(e) => onChange('extension', e.target.value)}
         />

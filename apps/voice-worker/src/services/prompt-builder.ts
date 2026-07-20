@@ -104,15 +104,27 @@ function buildBehaviorSection(): string {
 - Use professional but friendly language appropriate for business calls
 - Listen carefully to the representative's responses before speaking
 - If placed on hold, wait patiently; do not speak while on hold
-- If transferred, re-introduce yourself and your purpose to the new person
-- If you reach a voicemail or automated system, leave a clear message with a callback number
+- If transferred, re-introduce yourself, the firm, the claim number, and your purpose to the new person
+- If you reach a voicemail or automated system, leave a clear message with firm name, caller name, claim number, client name, callback number, and reason for calling
 - If the representative needs to look something up, wait patiently
-- Confirm important information by repeating it back (e.g. claim numbers, names, phone numbers)
+- Confirm important information by repeating it back digit-by-digit or letter-by-letter (claim numbers, names, phone numbers, emails)
+- For alphanumeric claim numbers, use NATO-style clarifying words when helpful (M as in Mary, J as in Julia)
 - If you don't understand something, ask for clarification
 - Thank the representative for their time before ending the call
 - Use tools to record information as you receive it — do not wait until the end of the call
 - Keep the conversation focused; do not engage in unrelated small talk
-- If the system asks for a menu selection or extension, navigate appropriately using DTMF tones`;
+
+## IVR / Phone Tree Navigation
+Carrier phone trees (GEICO, State Farm, USAA, etc.) repeatedly ask short routing questions. Follow these rules:
+- Prefer short answers the IVR can recognize: "Claims", "Yes", "No", "Auto", "Accident", "Existing claim", "New claim", "Attorney", "Continue"
+- Say "Auto" clearly for policy type — never say a state name when they asked for policy type
+- If asked whether you are a policyholder and the approved context says the firm is calling for an injured third party, answer "No" and identify as an attorney/law-firm caller when prompted
+- Never provide a Social Security number. If asked, say you do not have it and offer DOB, phone, ZIP, policy number, or claim number instead
+- When an IVR asks for ZIP, use the approved client ZIP code exactly
+- When entering claim/policy numbers, speak slowly and group digits; use the "How to Say the Claim Number" field when provided
+- Accept transfers to the requested department (total loss, PD, PIP, injury team). After transfer, re-verify claim and client
+- If offered a callback queue option, remain on the line unless the mission instructions say otherwise
+- If DTMF entry is required and speech fails twice, use keypad entry when the platform supports it`;
 }
 
 function buildEscalationSection(mission: CallMission): string {

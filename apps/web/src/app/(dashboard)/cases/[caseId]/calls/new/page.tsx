@@ -12,14 +12,18 @@ import { InstructionsStep } from '@/components/calls/mission-wizard/instructions
 import { ReviewStep } from '@/components/calls/mission-wizard/review-step';
 import { createClient } from '@/lib/supabase/client';
 import {
-  OPEN_INSURANCE_CLAIM_TEMPLATE,
   DEFAULT_VOICE_SETTINGS,
   APPROVED_CONTEXT_FIELDS,
+  CONTEXT_FIELD_LABELS,
+  MISSION_TEMPLATES_BY_TYPE,
+  DEFAULT_INCLUDED_FIELDS_BY_MISSION,
+  MISSION_TYPE_LABELS,
 } from '@outbound-call/shared';
 import type {
   Destination,
   MissionInstructions,
   ApprovedContextEntry,
+  MissionType,
 } from '@outbound-call/shared';
 
 const WIZARD_STEPS = [
@@ -29,34 +33,38 @@ const WIZARD_STEPS = [
   { title: 'Review' },
 ];
 
-const FIELD_LABELS: Record<string, string> = {
-  client_full_name: 'Client Full Name',
-  client_date_of_birth: 'Client Date of Birth',
-  client_address: 'Client Address',
-  client_phone_number: 'Client Phone Number',
-  injuries: 'Injuries',
-  date_of_loss: 'Date of Loss',
-  time_of_loss: 'Time of Loss',
-  location_of_loss: 'Location of Loss',
-  case_type: 'Case Type',
-  brief_incident_description: 'Brief Incident Description',
-  insured_name: 'Insured Name',
-  insurance_carrier: 'Insurance Carrier',
-  policy_number: 'Policy Number',
-  existing_claim_number: 'Existing Claim Number',
-  vehicle_year: 'Vehicle Year',
-  vehicle_make: 'Vehicle Make',
-  vehicle_model: 'Vehicle Model',
-  vehicle_identification_number: 'VIN',
-  police_report_number: 'Police Report Number',
-  attorney_name: 'Attorney Name',
-  law_firm_name: 'Law Firm Name',
-  law_firm_phone_number: 'Law Firm Phone',
-  law_firm_email_address: 'Law Firm Email',
-  law_firm_mailing_address: 'Law Firm Address',
-  representation_status: 'Representation Status',
-  other_approved_notes: 'Other Approved Notes',
-};
+function buildInstructions(missionType: MissionType): MissionInstructions {
+  const template = MISSION_TEMPLATES_BY_TYPE[missionType];
+  return {
+    goal: template.defaultGoal,
+    objectives: [...template.defaultObjectives],
+    successCriteria: [...template.defaultSuccessCriteria],
+    requiredInformation: [
+      'Claim number',
+      'Adjuster name',
+      'Adjuster phone / extension',
+      'Adjuster email',
+      'Fax number or mailing address',
+      'Documents promised / sent',
+      'Next steps and follow-up timing',
+    ],
+    allowedDisclosures: [...template.defaultAllowedDisclosures],
+    restrictedTopics: [...template.defaultRestrictedTopics],
+    escalationConditions: [...template.defaultEscalationRules],
+    additionalInstructions: '',
+  };
+}
+
+function applyMissionDefaults(
+  fields: ApprovedContextEntry[],
+  missionType: MissionType,
+): ApprovedContextEntry[] {
+  const included = new Set(DEFAULT_INCLUDED_FIELDS_BY_MISSION[missionType]);
+  return fields.map((f) => ({
+    ...f,
+    included: included.has(f.field) || Boolean(f.value?.trim()),
+  }));
+}
 
 export default function NewCallPage() {
   const params = useParams<{ caseId: string }>();
@@ -66,10 +74,11 @@ export default function NewCallPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [isLaunching, setIsLaunching] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [missionType, setMissionType] = useState<MissionType>('open_insurance_claim');
 
   const [destination, setDestination] = useState<Partial<Destination>>({
     organizationName: '',
-    department: '',
+    department: 'Claims',
     contactName: '',
     phoneNumber: '',
     extension: '',
@@ -77,32 +86,21 @@ export default function NewCallPage() {
   });
 
   const [contextFields, setContextFields] = useState<ApprovedContextEntry[]>(
-    APPROVED_CONTEXT_FIELDS.map((field) => ({
-      field,
-      label: FIELD_LABELS[field] ?? field.replace(/_/g, ' '),
-      value: '',
-      included: false,
-    })),
+    () =>
+      applyMissionDefaults(
+        APPROVED_CONTEXT_FIELDS.map((field) => ({
+          field,
+          label: CONTEXT_FIELD_LABELS[field],
+          value: '',
+          included: false,
+        })),
+        'open_insurance_claim',
+      ),
   );
 
-  const [instructions, setInstructions] = useState<MissionInstructions>({
-    goal: OPEN_INSURANCE_CLAIM_TEMPLATE.defaultGoal,
-    objectives: [...OPEN_INSURANCE_CLAIM_TEMPLATE.defaultObjectives],
-    successCriteria: [...OPEN_INSURANCE_CLAIM_TEMPLATE.defaultSuccessCriteria],
-    requiredInformation: [
-      'Claim number',
-      'Adjuster name',
-      'Adjuster phone number',
-      'Adjuster email address',
-      'Fax number or mailing address',
-      'Requested documents',
-      'Next steps',
-    ],
-    allowedDisclosures: [...OPEN_INSURANCE_CLAIM_TEMPLATE.defaultAllowedDisclosures],
-    restrictedTopics: [...OPEN_INSURANCE_CLAIM_TEMPLATE.defaultRestrictedTopics],
-    escalationConditions: [...OPEN_INSURANCE_CLAIM_TEMPLATE.defaultEscalationRules],
-    additionalInstructions: '',
-  });
+  const [instructions, setInstructions] = useState<MissionInstructions>(() =>
+    buildInstructions('open_insurance_claim'),
+  );
 
   const loadCaseData = useCallback(async () => {
     const supabase = createClient();
@@ -126,7 +124,6 @@ export default function NewCallPage() {
         .filter(Boolean)
         .join(' ');
 
-    // Map approved-context fields to actual Case Tracker columns
     const mappedValues: Record<string, string | null | undefined> = {
       client_full_name: clientFullName,
       client_date_of_birth: caseData.date_of_birth,
@@ -137,21 +134,39 @@ export default function NewCallPage() {
       injuries: trackerData?.injuries,
       attorney_name: trackerData?.attorney_name,
       law_firm_name: 'Ramos James Law',
+      law_firm_phone_number: '(512) 537-3369',
+      representation_status: 'Firm represents the client',
+      policy_type: 'auto',
+      incident_type: 'accident',
+      accident_state: 'Texas',
+      policyholder_status: 'No — attorney calling on behalf of injured party',
     };
 
     setContextFields((prev) =>
-      prev.map((f) => {
-        const mapped = mappedValues[f.field];
-        const direct = caseData[f.field];
-        const value = mapped ?? direct;
-        return { ...f, value: value ? String(value) : '' };
-      }),
+      applyMissionDefaults(
+        prev.map((f) => {
+          const mapped = mappedValues[f.field];
+          const value = mapped ? String(mapped) : f.value;
+          return {
+            ...f,
+            value,
+            missionSpecificValue: f.missionSpecificValue ?? (value || undefined),
+          };
+        }),
+        missionType,
+      ),
     );
-  }, [caseId]);
+  }, [caseId, missionType]);
 
   useEffect(() => {
     loadCaseData();
   }, [loadCaseData]);
+
+  const handleMissionTypeChange = (next: MissionType) => {
+    setMissionType(next);
+    setInstructions(buildInstructions(next));
+    setContextFields((prev) => applyMissionDefaults(prev, next));
+  };
 
   const validateStep = (step: number): boolean => {
     const newErrors: Record<string, string> = {};
@@ -205,7 +220,14 @@ export default function NewCallPage() {
   const handleUpdateFieldValue = (index: number, value: string) => {
     setContextFields((prev) =>
       prev.map((f, i) =>
-        i === index ? { ...f, missionSpecificValue: value } : f,
+        i === index
+          ? {
+              ...f,
+              missionSpecificValue: value,
+              // Typing a value authorizes disclosure; clearing turns it off unless still toggled
+              included: value.trim().length > 0 ? true : f.included,
+            }
+          : f,
       ),
     );
   };
@@ -224,6 +246,14 @@ export default function NewCallPage() {
     }
   };
 
+  const includedContext = contextFields
+    .filter((f) => f.included)
+    .map((f) => ({
+      ...f,
+      value: f.missionSpecificValue?.trim() || f.value,
+      missionSpecificValue: f.missionSpecificValue,
+    }));
+
   const handleSaveDraft = async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -231,8 +261,8 @@ export default function NewCallPage() {
 
     await supabase.from('call_missions').insert({
       case_id: caseId,
-      mission_type: 'open_insurance_claim',
-      title: `Open Claim - ${destination.organizationName}`,
+      mission_type: missionType,
+      title: `${MISSION_TYPE_LABELS[missionType]} - ${destination.organizationName}`,
       organization_name: destination.organizationName,
       department: destination.department || null,
       contact_name: destination.contactName || null,
@@ -242,7 +272,7 @@ export default function NewCallPage() {
       goal: instructions.goal,
       objectives: instructions.objectives,
       success_criteria: instructions.successCriteria,
-      approved_context: contextFields.filter((f) => f.included),
+      approved_context: includedContext,
       allowed_disclosures: instructions.allowedDisclosures,
       restricted_topics: instructions.restrictedTopics,
       escalation_rules: instructions.escalationConditions,
@@ -261,8 +291,9 @@ export default function NewCallPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           caseId,
+          missionType,
           destination,
-          contextFields: contextFields.filter((f) => f.included),
+          contextFields: includedContext,
           instructions,
           callingHoursOverride,
         }),
@@ -338,8 +369,10 @@ export default function NewCallPage() {
         {currentStep === 0 && (
           <DestinationStep
             data={destination}
+            missionType={missionType}
             errors={errors}
             onChange={handleDestinationChange}
+            onMissionTypeChange={handleMissionTypeChange}
           />
         )}
         {currentStep === 1 && (

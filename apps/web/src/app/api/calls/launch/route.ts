@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
     contextFields,
     instructions,
     callingHoursOverride = false,
+    missionType = 'open_insurance_claim',
   } = body;
 
   if (!caseId || !destination?.phoneNumber || !destination?.organizationName) {
@@ -133,8 +134,8 @@ export async function POST(request: NextRequest) {
     .from('call_missions')
     .insert({
       case_id: caseId,
-      mission_type: 'open_insurance_claim',
-      title: `Open Claim - ${destination.organizationName}`,
+      mission_type: missionType,
+      title: `${destination.organizationName} call`,
       organization_name: destination.organizationName,
       department: destination.department || null,
       contact_name: destination.contactName || null,

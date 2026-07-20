@@ -253,7 +253,7 @@ export default function NewCallPage() {
     router.push(`/cases/${caseId}/calls`);
   };
 
-  const handleLaunch = async () => {
+  const launchCall = async (callingHoursOverride: boolean) => {
     setIsLaunching(true);
     try {
       const response = await fetch('/api/calls/launch', {
@@ -264,11 +264,36 @@ export default function NewCallPage() {
           destination,
           contextFields: contextFields.filter((f) => f.included),
           instructions,
+          callingHoursOverride,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
+
+        if (
+          errorData.code === 'OUTSIDE_CALLING_HOURS' &&
+          errorData.canOverride === true &&
+          !callingHoursOverride
+        ) {
+          const hours = errorData.allowedHours;
+          const confirmed = window.confirm(
+            `This destination is outside the configured calling hours` +
+              (hours
+                ? ` (${hours.startTime}–${hours.endTime} ${hours.timezone})`
+                : '') +
+              '.\n\nCall anyway? This override will be recorded.',
+          );
+
+          if (confirmed) {
+            await launchCall(true);
+            return;
+          }
+
+          setIsLaunching(false);
+          return;
+        }
+
         alert(errorData.error ?? 'Failed to launch call');
         setIsLaunching(false);
         return;
@@ -280,6 +305,10 @@ export default function NewCallPage() {
       alert('Network error. Please try again.');
       setIsLaunching(false);
     }
+  };
+
+  const handleLaunch = () => {
+    void launchCall(false);
   };
 
   const handleCancel = () => {

@@ -26,7 +26,13 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { caseId, destination, contextFields, instructions } = body;
+  const {
+    caseId,
+    destination,
+    contextFields,
+    instructions,
+    callingHoursOverride = false,
+  } = body;
 
   if (!caseId || !destination?.phoneNumber || !destination?.organizationName) {
     return NextResponse.json(
@@ -84,11 +90,17 @@ export async function POST(request: NextRequest) {
   // Enforce calling hours only in live mode so mock testing works anytime
   if (
     voiceMode === 'live' &&
-    !isWithinCallingHours(destTimezone, startTime, endTime)
+    !isWithinCallingHours(destTimezone, startTime, endTime) &&
+    callingHoursOverride !== true
   ) {
     return NextResponse.json(
-      { error: 'Outside allowed calling hours for the destination time zone' },
-      { status: 400 },
+      {
+        error: 'Outside allowed calling hours for the destination time zone',
+        code: 'OUTSIDE_CALLING_HOURS',
+        canOverride: true,
+        allowedHours: { startTime, endTime, timezone: destTimezone },
+      },
+      { status: 409 },
     );
   }
 
@@ -112,6 +124,9 @@ export async function POST(request: NextRequest) {
     approvedContext,
     destination: { ...destination, phoneNumber: normalizedPhone },
     voiceMode,
+    callingHoursOverride: callingHoursOverride === true,
+    callingHoursOverrideAt:
+      callingHoursOverride === true ? new Date().toISOString() : null,
   };
 
   const { data: mission, error: insertError } = await supabase

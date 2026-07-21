@@ -3,9 +3,10 @@ import Twilio from 'twilio';
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
+import type { CallStatus } from '@outbound-call/shared';
 import { canTransitionStatus } from '@outbound-call/shared';
-import type { CallMission, CallStatus } from '@outbound-call/shared';
 import { MockCallProvider } from './mock-call-provider.js';
+import { mapDbMissionToCallMission } from './map-mission.js';
 
 const twilioClient = Twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN);
 
@@ -143,7 +144,8 @@ export async function launchCall(missionId: string): Promise<{
   if (config.VOICE_MODE === 'mock') {
     logger.mock('Delegating to MockCallProvider', logCtx);
     const mock = new MockCallProvider();
-    mock.simulateCall(mission as CallMission, callSessionId).catch((err) => {
+    const mapped = mapDbMissionToCallMission(mission as Record<string, unknown>);
+    mock.simulateCall(mapped, callSessionId).catch((err) => {
       logger.error('Mock call simulation failed', {
         ...logCtx,
         error: err,

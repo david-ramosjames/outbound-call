@@ -10,6 +10,7 @@ import {
   type ToolCallContext,
 } from './grok-tools.js';
 import { processCallResults } from './post-call-processor.js';
+import { mapDbVoiceSettings } from './map-mission.js';
 import type { CallMission, VoiceSettings } from '@outbound-call/shared';
 
 interface TranscriptAccumulator {
@@ -43,28 +44,13 @@ export class XaiVoiceSession {
     logger.info('Opening xAI WebSocket', logCtx);
 
     // Fetch voice settings
-    const { data: voiceSettings } = await supabase
+    const { data: voiceSettingsRow } = await supabase
       .from('voice_settings')
       .select('*')
       .limit(1)
       .single();
 
-    const vs: VoiceSettings = voiceSettings ?? {
-      id: '',
-      aiDisclosureText:
-        "Hello, I'm an AI-assisted calling agent contacting you on behalf of Ramos James Law regarding a client insurance matter.",
-      recordingDisclosureText:
-        'This call may be recorded for quality assurance purposes.',
-      recordingEnabled: false,
-      allowedCallStartTime: '09:00',
-      allowedCallEndTime: '17:00',
-      maximumCallDurationSeconds: 1800,
-      maximumHoldDurationSeconds: 600,
-      defaultVoice: 'alloy',
-      isEnabled: true,
-      createdAt: '',
-      updatedAt: '',
-    };
+    const vs = mapDbVoiceSettings(voiceSettingsRow as Record<string, unknown> | null);
 
     // SIP calls must join with call_id from realtime.call.incoming.
     // Direct (non-SIP) sessions can still use agent_id.
@@ -89,24 +75,33 @@ export class XaiVoiceSession {
     this.ws.on('open', () => {
       logger.info('xAI WebSocket connected', logCtx);
 
-      this.updateSessionStatus('connected');
-      this.emitCallEvent('xai_websocket_connected', {
-        mode: isSipCall ? 'sip_call_id' : 'agent_id',
-        xaiCallId: callId,
-      });
-
-      this.sendSessionUpdate(mission, vs);
-      this.sendInitialGreeting();
-
-      // Maximum call duration timer
-      const maxMs = vs.maximumCallDurationSeconds * 1000;
-      this.maxDurationTimer = setTimeout(() => {
-        logger.warn('Maximum call duration reached', {
-          ...logCtx,
-          duration: vs.maximumCallDurationSeconds,
+      try {
+        this.updateSessionStatus('connected');
+        this.emitCallEvent('xai_websocket_connected', {
+          mode: isSipCall ? 'sip_call_id' : 'agent_id',
+          xaiCallId: callId,
         });
-        this.disconnect('max_duration_exceeded');
-      }, maxMs);
+
+        this.sendSessionUpdate(mission, vs);
+        this.sendInitialGreeting();
+
+        // Maximum call duration timer
+        const maxMs = vs.maximumCallDurationSeconds * 1000;
+        this.maxDurationTimer = setTimeout(() => {
+          logger.warn('Maximum call duration reached', {
+            ...logCtx,
+            duration: vs.maximumCallDurationSeconds,
+          });
+          this.disconnect('max_duration_exceeded');
+        }, maxMs);
+      } catch (err) {
+        logger.error('Failed during xAI WebSocket open handshake', {
+          ...logCtx,
+          error: err,
+          errorCategory: 'xai_session',
+        });
+        this.disconnect('session_setup_failed');
+      }
     });
 
     this.ws.on('message', (data) => {

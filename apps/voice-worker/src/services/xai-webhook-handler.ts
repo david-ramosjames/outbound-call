@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
 import { XaiVoiceSession } from './xai-voice-session.js';
+import { mapDbMissionToCallMission } from './map-mission.js';
 
 interface XaiSipHeader {
   name: string;
@@ -267,16 +268,20 @@ export async function handleXaiWebhook(
     xaiCallId,
   });
 
-  const { data: mission } = await supabase
+  const { data: missionRow } = await supabase
     .from('call_missions')
     .select('*')
     .eq('id', missionId)
     .single();
 
-  if (!mission) {
+  if (!missionRow) {
     logger.error('Mission not found for xAI session', { missionId });
     return;
   }
+
+  const mission = mapDbMissionToCallMission(
+    missionRow as Record<string, unknown>,
+  );
 
   await supabase
     .from('call_missions')

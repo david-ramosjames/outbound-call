@@ -45,11 +45,11 @@ If an automated phone tree is speaking, answer their prompts briefly — do not 
 }
 
 function buildMissionSection(mission: CallMission): string {
-  const objectives = mission.objectives
+  const objectives = (mission.objectives ?? [])
     .map((o, i) => `  ${i + 1}. ${o}`)
     .join('\n');
 
-  const criteria = mission.successCriteria
+  const criteria = (mission.successCriteria ?? [])
     .map((c, i) => `  ${i + 1}. ${c}`)
     .join('\n');
 
@@ -60,14 +60,14 @@ ${mission.contactName ? `**Contact:** ${mission.contactName}` : ''}
 **Goal:** ${mission.goal}
 
 **Objectives (in priority order):**
-${objectives}
+${objectives || '  (none specified)'}
 
 **Success Criteria:**
-${criteria}`;
+${criteria || '  (none specified)'}`;
 }
 
 function buildApprovedContextSection(mission: CallMission): string {
-  const included = mission.approvedContext.filter((c) => c.included);
+  const included = (mission.approvedContext ?? []).filter((c) => c.included);
 
   if (included.length === 0) {
     return `## Approved Context
@@ -90,20 +90,20 @@ ${items}
 }
 
 function buildRestrictionsSection(mission: CallMission): string {
-  const restricted = mission.restrictedTopics
+  const restricted = (mission.restrictedTopics ?? [])
     .map((t) => `  - ${t}`)
     .join('\n');
 
-  const allowed = mission.allowedDisclosures
+  const allowed = (mission.allowedDisclosures ?? [])
     .map((d) => `  - ${d}`)
     .join('\n');
 
   return `## Restrictions
 **You MAY disclose:**
-${allowed}
+${allowed || '  (none listed)'}
 
 **You MUST NOT disclose or discuss:**
-${restricted}
+${restricted || '  (none listed)'}
 
 If a restricted topic comes up, politely decline and redirect the conversation back to the mission objective. If the representative insists, use the \`record_escalation\` tool and consider ending the call.`;
 }
@@ -138,27 +138,27 @@ Carrier phone trees (GEICO, State Farm, USAA, etc.) repeatedly ask short routing
 }
 
 function buildEscalationSection(mission: CallMission): string {
-  const rules = mission.escalationRules
+  const rules = (mission.escalationRules ?? [])
     .map((r) => `  - ${r}`)
     .join('\n');
 
   return `## Escalation Rules
 If ANY of the following occur, immediately use the \`record_escalation\` tool and end the call politely:
 
-${rules}
+${rules || '  - Representative requests to speak with an attorney'}
 
 When escalating, explain to the representative that an attorney from the firm will follow up directly. Do not attempt to handle situations that require human judgment.`;
 }
 
 function buildCompletionSection(mission: CallMission): string {
-  const criteria = mission.successCriteria
+  const criteria = (mission.successCriteria ?? [])
     .map((c) => `  - [ ] ${c}`)
     .join('\n');
 
   return `## Completion Checklist
 Before ending the call, verify you have attempted to:
 
-${criteria}
+${criteria || '  - [ ] Complete the primary mission goal'}
 
 When ready to end the call:
 1. Summarize what was accomplished

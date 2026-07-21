@@ -33,6 +33,17 @@ export async function GET(request: Request) {
   const { error: roleError } = await supabase.rpc('ensure_user_role');
   if (roleError) {
     console.error('[auth/callback] ensure_user_role failed', roleError);
+    if (user?.id) {
+      const { error: upsertError } = await supabase
+        .from('case_tracker_user_roles')
+        .upsert(
+          { user_id: user.id, role: 'staff', active: true },
+          { onConflict: 'user_id' },
+        );
+      if (upsertError) {
+        console.error('[auth/callback] role upsert failed', upsertError);
+      }
+    }
   }
 
   return NextResponse.redirect(`${appUrl}${next}`);

@@ -25,6 +25,6 @@ export const DEFAULT_VOICE_SETTINGS = {
   allowedCallEndTime: '17:00',
   maximumCallDurationSeconds: 1800,
   maximumHoldDurationSeconds: 600,
-  defaultVoice: 'alloy',
+  defaultVoice: 'eve',
   isEnabled: true,
 };

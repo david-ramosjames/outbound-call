@@ -11,10 +11,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Ensure RLS helpers see an active role for this Google user
+  // Ensure RLS helpers see an active role for this Google user.
+  // Prefer RPC when present; fall back to a direct upsert (migration may not be applied yet).
   const { error: roleError } = await supabase.rpc('ensure_user_role');
   if (roleError) {
     console.error('[launch] ensure_user_role failed', roleError);
+    const { error: upsertError } = await supabase
+      .from('case_tracker_user_roles')
+      .upsert(
+        { user_id: user.id, role: 'staff', active: true },
+        { onConflict: 'user_id' },
+      );
+    if (upsertError) {
+      console.error('[launch] role upsert failed', upsertError);
+    }
   }
 
   const permitted = await canLaunchCalls(user.id);

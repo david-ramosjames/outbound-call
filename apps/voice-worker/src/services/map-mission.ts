@@ -159,13 +159,33 @@ export function mapDbVoiceSettings(
       'maximum_hold_duration_seconds',
       DEFAULT_VOICE_SETTINGS.maximumHoldDurationSeconds,
     ),
-    defaultVoice: pickStr(
-      'defaultVoice',
-      'default_voice',
-      DEFAULT_VOICE_SETTINGS.defaultVoice,
+    defaultVoice: normalizeXaiVoice(
+      pickStr(
+        'defaultVoice',
+        'default_voice',
+        DEFAULT_VOICE_SETTINGS.defaultVoice,
+      ),
     ),
     isEnabled: pickBool('isEnabled', 'is_enabled', DEFAULT_VOICE_SETTINGS.isEnabled),
     createdAt: pickStr('createdAt', 'created_at', new Date().toISOString()),
     updatedAt: pickStr('updatedAt', 'updated_at', new Date().toISOString()),
   };
+}
+
+/** Map legacy OpenAI voice names to xAI built-ins. */
+export function normalizeXaiVoice(voice: string): string {
+  const v = (voice || '').trim().toLowerCase();
+  const openaiToXai: Record<string, string> = {
+    alloy: 'eve',
+    ash: 'rex',
+    ballad: 'sal',
+    coral: 'ara',
+    echo: 'leo',
+    sage: 'eve',
+    shimmer: 'ara',
+    verse: 'leo',
+  };
+  if (openaiToXai[v]) return openaiToXai[v];
+  const allowed = new Set(['eve', 'ara', 'rex', 'sal', 'leo']);
+  return allowed.has(v) ? v : 'eve';
 }

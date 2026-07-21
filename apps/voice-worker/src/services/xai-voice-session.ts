@@ -10,7 +10,7 @@ import {
   type ToolCallContext,
 } from './grok-tools.js';
 import { processCallResults } from './post-call-processor.js';
-import { mapDbVoiceSettings } from './map-mission.js';
+import { mapDbVoiceSettings, normalizeXaiVoice } from './map-mission.js';
 import type { CallMission, VoiceSettings } from '@outbound-call/shared';
 
 interface TranscriptAccumulator {
@@ -28,6 +28,8 @@ export class XaiVoiceSession {
   private maxDurationTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionStartMs = 0;
   private disconnecting = false;
+  private greetingSent = false;
+  private pendingGreeting = false;
 
   constructor(missionId: string, callSessionId: string) {
     this.missionId = missionId;
@@ -83,7 +85,15 @@ export class XaiVoiceSession {
         });
 
         this.sendSessionUpdate(mission, vs);
-        this.sendInitialGreeting();
+        // Defer spoken greeting until session.updated confirms config applied.
+        this.pendingGreeting = true;
+        // Fallback if session.updated never arrives
+        setTimeout(() => {
+          if (this.pendingGreeting && !this.greetingSent) {
+            logger.warn('session.updated not received; sending greeting anyway', logCtx);
+            this.sendInitialGreeting();
+          }
+        }, 2500);
 
         // Maximum call duration timer
         const maxMs = vs.maximumCallDurationSeconds * 1000;
@@ -170,12 +180,14 @@ export class XaiVoiceSession {
       .eq('id', this.missionId)
       .then();
 
+    const voice = normalizeXaiVoice(voiceSettings.defaultVoice);
+
     const sessionUpdate = {
       type: 'session.update',
       session: {
         instructions: prompt,
         tools: getToolDefinitions(),
-        voice: voiceSettings.defaultVoice,
+        voice,
         turn_detection: { type: 'server_vad' },
         // Current xAI schema: enable user-side transcription so we receive
         // conversation.item.input_audio_transcription.completed events.
@@ -189,21 +201,29 @@ export class XaiVoiceSession {
 
     this.send(sessionUpdate);
     this.emitCallEvent('agent_session_configured', {
-      voice: voiceSettings.defaultVoice,
+      voice,
     });
 
     logger.info('Session configured', {
       missionId: this.missionId,
       callSessionId: this.callSessionId,
+      voice,
     });
   }
 
   private sendInitialGreeting(): void {
+    if (this.greetingSent || this.disconnecting) return;
+    this.greetingSent = true;
+    this.pendingGreeting = false;
+
+    // Do not send OpenAI-only `modalities` — xAI SIP sessions reject unknown fields.
     this.send({
       type: 'response.create',
-      response: {
-        modalities: ['audio', 'text'],
-      },
+    });
+
+    logger.info('Initial greeting requested', {
+      missionId: this.missionId,
+      callSessionId: this.callSessionId,
     });
   }
 
@@ -243,10 +263,18 @@ export class XaiVoiceSession {
         break;
 
       case 'session.created':
-      case 'session.updated':
-        logger.debug(`xAI session event: ${type}`, {
+        logger.info('xAI session.created', {
           missionId: this.missionId,
         });
+        break;
+
+      case 'session.updated':
+        logger.info('xAI session.updated', {
+          missionId: this.missionId,
+        });
+        if (this.pendingGreeting && !this.greetingSent) {
+          this.sendInitialGreeting();
+        }
         break;
 
       case 'input_audio_buffer.speech_started':
@@ -378,8 +406,10 @@ export class XaiVoiceSession {
       missionId: this.missionId,
       callSessionId: this.callSessionId,
       errorCategory: 'xai_realtime',
-      errorMessage: error?.message as string,
-      errorCode: error?.code as string,
+      errorMessage: (error?.message as string) ?? String(event.message ?? ''),
+      errorCode: error?.code as string | undefined,
+      errorType: error?.type as string | undefined,
+      eventJson: JSON.stringify(event).slice(0, 800),
     });
   }
 

@@ -27,13 +27,18 @@ twilioRouter.post(
       correlationToken = mission?.correlation_token || missionId;
     }
 
-    // Custom SIP headers let the xAI realtime.call.incoming webhook
-    // correlate back to this mission.
+    // Custom SIP headers + URI query params let the xAI realtime.call.incoming
+    // webhook correlate back to this mission (Twilio forwards both forms).
+    const sipUri = appendSipParams(config.XAI_SIP_URI, {
+      'X-Correlation-Token': correlationToken,
+      'X-Mission-Id': missionId,
+    });
+
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial>
+  <Dial answerOnBridge="true">
     <Sip>
-      ${config.XAI_SIP_URI}
+      ${escapeXml(sipUri)}
       <Header name="X-Correlation-Token" value="${escapeXml(correlationToken)}" />
       <Header name="X-Mission-Id" value="${escapeXml(missionId)}" />
     </Sip>
@@ -43,6 +48,19 @@ twilioRouter.post(
     res.status(200).set('Content-Type', 'text/xml').send(twiml);
   }
 );
+
+function appendSipParams(
+  sipUri: string,
+  params: Record<string, string>,
+): string {
+  const qs = Object.entries(params)
+    .filter(([, v]) => Boolean(v))
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  if (!qs) return sipUri;
+  const joiner = sipUri.includes('?') ? '&' : '?';
+  return `${sipUri}${joiner}${qs}`;
+}
 
 function escapeXml(value: string): string {
   return value

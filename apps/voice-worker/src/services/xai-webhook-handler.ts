@@ -347,12 +347,18 @@ async function correlateXaiCall(
     if (byId) return byId.id;
   }
 
-  // Fallback: most recent answered / in-progress mission (single-call V1)
+  // Fallback: most recent live mission (webhook can arrive before Twilio "answered")
   const { data: recentMission } = await supabase
     .from('call_missions')
     .select('id')
-    .in('status', ['answered', 'in_progress'])
-    .order('answered_at', { ascending: false })
+    .in('status', [
+      'initiating',
+      'dialing',
+      'ringing',
+      'answered',
+      'in_progress',
+    ])
+    .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 

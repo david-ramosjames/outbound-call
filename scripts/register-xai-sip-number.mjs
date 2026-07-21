@@ -125,7 +125,9 @@ Do this:
   console.log('\nSuccess. Full response:');
   console.log(JSON.stringify(res.json, null, 2));
 
-  const secret = res.json?.webhook?.dispatch_signing_secret;
+  const secret =
+    res.json?.webhook?.dispatch_signing_secret ??
+    res.json?.webhook?.dispatchSigningSecret;
   if (secret) {
     console.log('\n==================================================');
     console.log('WEBHOOK SIGNING SECRET (store now — shown only once):');
@@ -133,7 +135,7 @@ Do this:
     console.log('Set this as XAI_SIP_WEBHOOK_SECRET on the voice worker.');
     console.log('==================================================');
   } else {
-    console.log('\nNo dispatch_signing_secret in response — check the JSON above.');
+    console.log('\nNo dispatch signing secret in response — check the JSON above.');
   }
 }
 

@@ -178,13 +178,16 @@ export class XaiVoiceSession {
     const sessionUpdate = {
       type: 'session.update',
       session: {
-        modalities: ['audio', 'text'],
         instructions: prompt,
         tools: getToolDefinitions(),
         voice: voiceSettings.defaultVoice,
         turn_detection: { type: 'server_vad' },
-        input_audio_transcription: {
-          model: 'grok-2-audio',
+        // Current xAI schema: enable user-side transcription so we receive
+        // conversation.item.input_audio_transcription.completed events.
+        audio: {
+          input: {
+            transcription: { model: 'grok-transcribe' },
+          },
         },
       },
     };
@@ -226,6 +229,10 @@ export class XaiVoiceSession {
 
       case 'conversation.item.input_audio_transcription.completed':
         await this.handleUserSpeech(event);
+        break;
+
+      // Cumulative live-caption updates; ignored for storage (we persist on completed)
+      case 'conversation.item.input_audio_transcription.updated':
         break;
 
       case 'response.function_call_arguments.done':

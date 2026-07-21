@@ -38,7 +38,18 @@ export function verifyXaiSignature(
   webhookTimestamp?: string,
 ): boolean {
   try {
-    if (webhookId && webhookTimestamp && signature.includes('v1,')) {
+    const isStandardFormat = /(?:^|\s)v1,/.test(signature);
+
+    if (isStandardFormat) {
+      if (!webhookId || !webhookTimestamp) {
+        logger.warn('xAI webhook has v1 signature but missing id/timestamp headers', {
+          hasWebhookId: Boolean(webhookId),
+          hasWebhookTimestamp: Boolean(webhookTimestamp),
+          errorCategory: 'webhook_auth',
+        });
+        return false;
+      }
+
       return verifyStandardWebhookSignature(
         rawBody,
         signature,
@@ -54,16 +65,32 @@ export function verifyXaiSignature(
 
     const sigBuf = Buffer.from(signature, 'hex');
     const expBuf = Buffer.from(expected, 'hex');
-    if (sigBuf.length !== expBuf.length) return false;
+    if (sigBuf.length !== expBuf.length || sigBuf.length === 0) return false;
 
     return crypto.timingSafeEqual(sigBuf, expBuf);
   } catch (err) {
-    logger.warn('xAI signature verification failed', {
+    logger.warn('xAI signature verification threw', {
       error: err,
       errorCategory: 'webhook_auth',
     });
     return false;
   }
+}
+
+/** Safe metadata for diagnosing secret/env issues without logging the secret. */
+export function webhookSecretDiagnostics(secret = config.XAI_SIP_WEBHOOK_SECRET): Record<string, unknown> {
+  const trimmed = secret.trim();
+  const key = decodeWebhookSecret(trimmed);
+  return {
+    secretLen: trimmed.length,
+    secretPrefix: trimmed.slice(0, 6),
+    startsWithWhsec: trimmed.startsWith('whsec_'),
+    endsWithSlash: trimmed.endsWith('/'),
+    containsPlus: trimmed.includes('+'),
+    containsSpace: /\s/.test(trimmed),
+    decodedKeyBytes: key.length,
+    fingerprint: crypto.createHash('sha256').update(trimmed).digest('hex').slice(0, 12),
+  };
 }
 
 function verifyStandardWebhookSignature(
@@ -72,44 +99,96 @@ function verifyStandardWebhookSignature(
   webhookId: string,
   webhookTimestamp: string,
 ): boolean {
-  const secret = decodeWebhookSecret(config.XAI_SIP_WEBHOOK_SECRET);
+  const normalizedSecret = normalizeWebhookSecret(config.XAI_SIP_WEBHOOK_SECRET);
+  const secretKeys = uniqueBuffers([
+    decodeWebhookSecret(normalizedSecret),
+    // Fallbacks for common Railway/env mangling of + and trailing /
+    decodeWebhookSecret(normalizedSecret.replace(/ /g, '+')),
+    decodeWebhookSecret(
+      normalizedSecret.endsWith('/') ? normalizedSecret : `${normalizedSecret}/`,
+    ),
+  ]);
+
   const signedContent = `${webhookId}.${webhookTimestamp}.${rawBody}`;
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(signedContent)
-    .digest('base64');
 
   const candidates = signatureHeader
-    .split(' ')
+    .split(/[\s]+/)
     .map((part) => part.trim())
     .filter((part) => part.startsWith('v1,'))
     .map((part) => part.slice(3));
 
-  return candidates.some((candidate) => {
-    try {
-      const a = Buffer.from(candidate);
-      const b = Buffer.from(expected);
-      return a.length === b.length && crypto.timingSafeEqual(a, b);
-    } catch {
-      return false;
+  for (const key of secretKeys) {
+    const expectedB64 = crypto
+      .createHmac('sha256', key)
+      .update(signedContent, 'utf8')
+      .digest('base64');
+    const expectedBytes = Buffer.from(expectedB64, 'base64');
+
+    for (const candidate of candidates) {
+      try {
+        const candidateBytes = Buffer.from(candidate, 'base64');
+        if (
+          candidateBytes.length > 0 &&
+          candidateBytes.length === expectedBytes.length &&
+          crypto.timingSafeEqual(candidateBytes, expectedBytes)
+        ) {
+          return true;
+        }
+      } catch {
+        // try next
+      }
     }
+  }
+
+  logger.warn('xAI standard webhook signature mismatch', {
+    ...webhookSecretDiagnostics(normalizedSecret),
+    bodyBytes: Buffer.byteLength(rawBody, 'utf8'),
+    candidateCount: candidates.length,
+    webhookIdPrefix: webhookId.slice(0, 12),
+    errorCategory: 'webhook_auth',
   });
+
+  return false;
+}
+
+function normalizeWebhookSecret(secret: string): string {
+  // Trim whitespace/newlines; restore + if a URL-decoder turned it into a space
+  let s = secret.trim();
+  if (s.startsWith('whsec_') && /\s/.test(s.slice('whsec_'.length))) {
+    s = `whsec_${s.slice('whsec_'.length).replace(/ /g, '+')}`;
+  }
+  return s;
 }
 
 function decodeWebhookSecret(secret: string): Buffer {
-  if (secret.startsWith('whsec_')) {
-    return Buffer.from(secret.slice('whsec_'.length), 'base64');
+  const normalized = normalizeWebhookSecret(secret);
+  if (normalized.startsWith('whsec_')) {
+    return Buffer.from(normalized.slice('whsec_'.length), 'base64');
   }
-  // Prefer base64 when it looks like it; otherwise treat as raw utf8
   try {
-    const decoded = Buffer.from(secret, 'base64');
-    if (decoded.length > 0 && decoded.toString('base64').replace(/=+$/, '') === secret.replace(/=+$/, '')) {
+    const decoded = Buffer.from(normalized, 'base64');
+    if (
+      decoded.length > 0 &&
+      decoded.toString('base64').replace(/=+$/, '') === normalized.replace(/=+$/, '')
+    ) {
       return decoded;
     }
   } catch {
     // fall through
   }
-  return Buffer.from(secret, 'utf8');
+  return Buffer.from(normalized, 'utf8');
+}
+
+function uniqueBuffers(bufs: Buffer[]): Buffer[] {
+  const seen = new Set<string>();
+  const out: Buffer[] = [];
+  for (const b of bufs) {
+    const hex = b.toString('hex');
+    if (seen.has(hex)) continue;
+    seen.add(hex);
+    out.push(b);
+  }
+  return out;
 }
 
 export async function handleXaiWebhook(

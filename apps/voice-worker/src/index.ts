@@ -89,6 +89,19 @@ app.listen(port, '0.0.0.0', () => {
   });
   console.log(`\n  voice-worker listening on http://0.0.0.0:${port}`);
   console.log(`  ${modeLabel}\n`);
+
+  if (config.VOICE_MODE === 'live') {
+    import('./services/xai-webhook-handler.js')
+      .then(({ webhookSecretDiagnostics }) => {
+        console.log(
+          '  xAI webhook secret:',
+          JSON.stringify(webhookSecretDiagnostics()),
+        );
+      })
+      .catch((err) => {
+        console.warn('  Could not diagnose webhook secret:', err);
+      });
+  }
 });
 
 export default app;

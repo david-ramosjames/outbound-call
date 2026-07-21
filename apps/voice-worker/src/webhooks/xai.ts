@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import {
   handleXaiWebhook,
   verifyXaiSignature,
+  webhookSecretDiagnostics,
 } from '../services/xai-webhook-handler.js';
 
 export const xaiRouter: RouterType = Router();
@@ -12,11 +13,14 @@ export const xaiRouter: RouterType = Router();
 xaiRouter.post(
   '/webhooks/xai/sip',
   (req: Request, res: Response): void => {
+    const rawBuf = (req as Request & { rawBody?: Buffer }).rawBody;
     const rawBody =
-      (req as Request & { rawBody?: Buffer }).rawBody?.toString('utf8') ??
+      rawBuf?.toString('utf8') ??
       (typeof req.body === 'string'
         ? req.body
         : JSON.stringify(req.body ?? {}));
+
+    const usedRawBuffer = Boolean(rawBuf);
 
     const standardId = headerValue(req, 'webhook-id');
     const standardTimestamp = headerValue(req, 'webhook-timestamp');
@@ -31,6 +35,7 @@ xaiRouter.post(
       if (!signature) {
         logger.warn('xAI webhook missing signature headers', {
           headers: Object.keys(req.headers),
+          ...webhookSecretDiagnostics(),
         });
         res.status(401).json({ error: 'Missing signature' });
         return;
@@ -45,7 +50,13 @@ xaiRouter.post(
 
       if (!valid) {
         logger.warn('xAI webhook signature verification failed', {
-          hasStandardHeaders: Boolean(standardId && standardTimestamp && standardSignature),
+          hasStandardHeaders: Boolean(
+            standardId && standardTimestamp && standardSignature,
+          ),
+          usedRawBuffer,
+          bodyBytes: Buffer.byteLength(rawBody, 'utf8'),
+          signaturePrefix: signature.slice(0, 6),
+          ...webhookSecretDiagnostics(),
         });
         res.status(401).json({ error: 'Invalid signature' });
         return;

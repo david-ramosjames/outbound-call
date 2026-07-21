@@ -307,26 +307,96 @@ function extractSipHeaderMap(
   if (!headers) return {};
 
   if (Array.isArray(headers)) {
-    return Object.fromEntries(
-      headers
-        .filter((h) => h?.name && h?.value != null)
-        .map((h) => [h.name, h.value]),
-    );
+    const map: Record<string, string> = {};
+    for (const h of headers) {
+      if (!h?.name || h.value == null) continue;
+      map[h.name] = String(h.value);
+      map[h.name.toLowerCase()] = String(h.value);
+    }
+    return map;
   }
 
-  return headers;
+  const map: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    map[k] = v;
+    map[k.toLowerCase()] = v;
+  }
+  return map;
+}
+
+function headerValueCI(
+  headers: Record<string, string>,
+  ...names: string[]
+): string | undefined {
+  for (const name of names) {
+    const v = headers[name] ?? headers[name.toLowerCase()];
+    if (v) return v;
+  }
+  // Last resort: scan keys case-insensitively
+  const lowerNames = names.map((n) => n.toLowerCase());
+  for (const [k, v] of Object.entries(headers)) {
+    if (lowerNames.includes(k.toLowerCase()) && v) return v;
+  }
+  return undefined;
+}
+
+/** Pull X-Correlation-Token / X-Mission-Id from SIP header map or embedded URIs. */
+function extractCorrelationToken(
+  headers: Record<string, string>,
+): string | undefined {
+  const direct = headerValueCI(
+    headers,
+    'X-Correlation-Token',
+    'X-Mission-Id',
+    'X-Mission-ID',
+  );
+  if (direct) {
+    // Sometimes value is a full SIP URI / angle-addr; pull UUID if present
+    const uuid = direct.match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    );
+    return uuid?.[0] ?? direct.trim();
+  }
+
+  // Twilio puts custom headers into the Request-URI / To as ?X-Foo=bar
+  for (const key of ['To', 'to', 'Request-URI', 'request-uri', 'Call-ID', 'call-id']) {
+    const raw = headers[key];
+    if (!raw) continue;
+    const fromQuery = tokenFromSipUri(raw);
+    if (fromQuery) return fromQuery;
+  }
+
+  // Scan every header value for our query params
+  for (const value of Object.values(headers)) {
+    const fromQuery = tokenFromSipUri(value);
+    if (fromQuery) return fromQuery;
+  }
+
+  return undefined;
+}
+
+function tokenFromSipUri(raw: string): string | undefined {
+  try {
+    const qIndex = raw.indexOf('?');
+    if (qIndex === -1) return undefined;
+    const query = raw.slice(qIndex + 1).split(/[;>\s]/)[0] ?? '';
+    const params = new URLSearchParams(query);
+    const token =
+      params.get('X-Correlation-Token') ??
+      params.get('x-correlation-token') ??
+      params.get('X-Mission-Id') ??
+      params.get('x-mission-id');
+    return token || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function correlateXaiCall(
   payload: XaiSipWebhookPayload
 ): Promise<string | null> {
   const sipHeaders = extractSipHeaderMap(payload);
-
-  const correlationToken =
-    sipHeaders['X-Correlation-Token'] ??
-    sipHeaders['x-correlation-token'] ??
-    sipHeaders['X-Mission-Id'] ??
-    sipHeaders['x-mission-id'];
+  const correlationToken = extractCorrelationToken(sipHeaders);
 
   if (correlationToken) {
     const { data: byToken } = await supabase
@@ -335,22 +405,64 @@ async function correlateXaiCall(
       .eq('correlation_token', correlationToken)
       .maybeSingle();
 
-    if (byToken) return byToken.id;
+    if (byToken) {
+      logger.info('Correlated xAI call via SIP token', {
+        missionId: byToken.id,
+        correlationToken,
+      });
+      return byToken.id;
+    }
 
-    // Allow passing mission id directly in the SIP header
     const { data: byId } = await supabase
       .from('call_missions')
       .select('id')
       .eq('id', correlationToken)
       .maybeSingle();
 
-    if (byId) return byId.id;
+    if (byId) {
+      logger.info('Correlated xAI call via mission id header', {
+        missionId: byId.id,
+      });
+      return byId.id;
+    }
   }
 
-  // Fallback: most recent live mission (webhook can arrive before Twilio "answered")
-  const { data: recentMission } = await supabase
+  // Fallback: most recent live mission (webhook often races ahead of Twilio "answered")
+  const recent = await findRecentLiveMission();
+  if (recent) {
+    logger.info('Correlated xAI call via recent live mission fallback', {
+      missionId: recent,
+      hadSipToken: Boolean(correlationToken),
+      sipHeaderNames: Object.keys(sipHeaders),
+    });
+    return recent;
+  }
+
+  // One short retry — Twilio status may land a few hundred ms later
+  await sleep(750);
+  const retried = await findRecentLiveMission();
+  if (retried) {
+    logger.info('Correlated xAI call via retry fallback', {
+      missionId: retried,
+    });
+    return retried;
+  }
+
+  logger.warn('Correlation exhausted', {
+    sipHeaderNames: Object.keys(sipHeaders),
+    sipHeaderSample: JSON.stringify(sipHeaders).slice(0, 800),
+    correlationToken: correlationToken ?? null,
+  });
+
+  return null;
+}
+
+async function findRecentLiveMission(): Promise<string | null> {
+  const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  const { data } = await supabase
     .from('call_missions')
-    .select('id')
+    .select('id, status, started_at, created_at')
     .in('status', [
       'initiating',
       'dialing',
@@ -358,11 +470,14 @@ async function correlateXaiCall(
       'answered',
       'in_progress',
     ])
-    .order('started_at', { ascending: false })
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (recentMission) return recentMission.id;
+  return data?.id ?? null;
+}
 
-  return null;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

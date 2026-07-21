@@ -27,21 +27,23 @@ twilioRouter.post(
       correlationToken = mission?.correlation_token || missionId;
     }
 
-    // Custom SIP headers + URI query params let the xAI realtime.call.incoming
-    // webhook correlate back to this mission (Twilio forwards both forms).
+    // Twilio forwards custom X-headers most reliably as SIP URI query params.
+    // Nested <Header> is also included as a backup.
     const sipUri = appendSipParams(config.XAI_SIP_URI, {
       'X-Correlation-Token': correlationToken,
       'X-Mission-Id': missionId,
     });
 
+    logger.info('TwiML SIP bridge URI prepared', {
+      missionId,
+      correlationToken,
+      sipUriPreview: sipUri.slice(0, 160),
+    });
+
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial answerOnBridge="true">
-    <Sip>
-      ${escapeXml(sipUri)}
-      <Header name="X-Correlation-Token" value="${escapeXml(correlationToken)}" />
-      <Header name="X-Mission-Id" value="${escapeXml(missionId)}" />
-    </Sip>
+  <Dial answerOnBridge="true" timeout="60">
+    <Sip>${escapeXml(sipUri)}</Sip>
   </Dial>
 </Response>`;
 

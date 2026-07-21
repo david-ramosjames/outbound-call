@@ -283,12 +283,11 @@ export default function VoiceSettingsPage() {
               }
               className="flex h-10 w-full max-w-xs rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-firm-accent"
             >
-              <option value="alloy">Alloy</option>
-              <option value="echo">Echo</option>
-              <option value="fable">Fable</option>
-              <option value="onyx">Onyx</option>
-              <option value="nova">Nova</option>
-              <option value="shimmer">Shimmer</option>
+              <option value="eve">Eve</option>
+              <option value="ara">Ara</option>
+              <option value="rex">Rex</option>
+              <option value="sal">Sal</option>
+              <option value="leo">Leo</option>
             </select>
           </div>
         </CardContent>

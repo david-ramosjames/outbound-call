@@ -1,10 +1,9 @@
 import Link from 'next/link';
-import { ArrowLeft, Plus, Phone } from 'lucide-react';
+import { ArrowLeft, Plus, Phone, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { CallStatusBadge, OutcomeBadge } from '@/components/calls/call-status-badge';
 import { formatDuration, formatPhoneNumber } from '@/lib/utils';
 import type { CallStatus, MissionOutcome } from '@outbound-call/shared';
@@ -25,9 +24,14 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
 
   const { data: caseData } = await supabase
     .from('cases')
-    .select('title')
+    .select('case_number, name, client_name')
     .eq('id', caseId)
     .single();
+
+  const caseLabel =
+    caseData?.case_number?.trim() ||
+    caseData?.name?.trim() ||
+    `Case ${caseId.slice(0, 8)}`;
 
   return (
     <div className="space-y-6">
@@ -42,7 +46,8 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">AI Calls</h1>
             <p className="text-sm text-slate-500">
-              {caseData?.title ?? `Case ${caseId.slice(0, 8)}`}
+              {caseLabel}
+              {caseData?.client_name ? ` · ${caseData.client_name}` : ''}
             </p>
           </div>
         </div>
@@ -82,6 +87,10 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
         <Card>
           <CardHeader>
             <CardTitle>Call History</CardTitle>
+            <p className="text-sm text-slate-500 font-normal">
+              Click a row to open the call. Calls marked Awaiting Review need you to
+              check the summary, transcript, and proposed updates, then mark review complete.
+            </p>
           </CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -93,7 +102,7 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Outcome</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Duration</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Date</th>
-                  <th className="text-left px-6 py-3 font-medium text-slate-500">Review</th>
+                  <th className="text-left px-6 py-3 font-medium text-slate-500">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -132,13 +141,19 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
                       </p>
                     </td>
                     <td className="px-6 py-3">
-                      {call.status === 'awaiting_review' ? (
-                        <Badge variant="warning">Pending</Badge>
-                      ) : call.status === 'reviewed' ? (
-                        <Badge variant="success">Done</Badge>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
+                      <Link href={`/cases/${caseId}/calls/${call.id}`}>
+                        {call.status === 'awaiting_review' ? (
+                          <Button size="sm">
+                            Review
+                            <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline">
+                            Open
+                            <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                          </Button>
+                        )}
+                      </Link>
                     </td>
                   </tr>
                 ))}

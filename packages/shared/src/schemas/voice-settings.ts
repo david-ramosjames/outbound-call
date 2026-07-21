@@ -18,7 +18,7 @@ export const voiceSettingsSchema = z.object({
 export type VoiceSettings = z.infer<typeof voiceSettingsSchema>;
 
 export const DEFAULT_VOICE_SETTINGS = {
-  aiDisclosureText: "Hello, I'm an AI-assisted calling agent contacting you on behalf of Ramos James Law regarding a client insurance matter.",
+  aiDisclosureText: "Hello, this is an AI-assisted outbound calling agent with Ramos James Law. I'm calling you regarding a client insurance matter.",
   recordingDisclosureText: 'This call may be recorded for quality assurance purposes.',
   recordingEnabled: false,
   allowedCallStartTime: '09:00',

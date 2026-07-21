@@ -28,25 +28,33 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/cases"
-          className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            {caseData?.case_number?.trim() ||
-              caseData?.name?.trim() ||
-              'Case Details'}
-          </h1>
-          <p className="text-sm text-slate-500">
-            {caseData?.client_name
-              ? `${caseData.client_name}${caseData.case_type ? ` · ${caseData.case_type}` : ''}`
-              : caseData?.case_type ?? 'Case details'}
-          </p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link
+            href="/cases"
+            className="p-2 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-slate-900 truncate">
+              {caseData?.case_number?.trim() ||
+                caseData?.name?.trim() ||
+                'Case Details'}
+            </h1>
+            <p className="text-sm text-slate-500">
+              {caseData?.client_name
+                ? `${caseData.client_name}${caseData.case_type ? ` · ${caseData.case_type}` : ''}`
+                : caseData?.case_type ?? 'Case details'}
+            </p>
+          </div>
         </div>
+        <Link href={`/cases/${caseId}/calls/new`} className="shrink-0">
+          <Button>
+            <Phone className="h-4 w-4 mr-1.5" />
+            New AI Call
+          </Button>
+        </Link>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -93,14 +101,22 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <CardTitle className="flex items-center gap-2">
                   <Phone className="h-4 w-4" />
                   AI Calls
                 </CardTitle>
-                <Link href={`/cases/${caseId}/calls`}>
-                  <Button size="sm" variant="outline">View All</Button>
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link href={`/cases/${caseId}/calls`}>
+                    <Button size="sm" variant="outline">View All</Button>
+                  </Link>
+                  <Link href={`/cases/${caseId}/calls/new`}>
+                    <Button size="sm">
+                      <Phone className="h-3.5 w-3.5 mr-1" />
+                      New
+                    </Button>
+                  </Link>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

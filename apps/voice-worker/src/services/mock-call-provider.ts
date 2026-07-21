@@ -211,8 +211,9 @@ export class MockCallProvider {
       })
       .eq('id', missionId);
 
+    const callResultId = uuidv4();
     await supabase.from('call_results').insert({
-      id: uuidv4(),
+      id: callResultId,
       call_mission_id: missionId,
       mission_outcome: outcome,
       completion_status: outcome,
@@ -223,6 +224,59 @@ export class MockCallProvider {
       commitments: [],
       deadlines: [],
     });
+
+    const fieldMap: Array<{ key: string; label: string; valueKey: string }> = [
+      { key: 'claim_number', label: 'Claim Number', valueKey: 'claimNumber' },
+      { key: 'adjuster_name', label: 'Adjuster Name', valueKey: 'adjusterName' },
+      { key: 'adjuster_phone', label: 'Adjuster Phone', valueKey: 'adjusterPhone' },
+      { key: 'adjuster_email', label: 'Adjuster Email', valueKey: 'adjusterEmail' },
+      {
+        key: 'representative_name',
+        label: 'Representative Name',
+        valueKey: 'representativeName',
+      },
+    ];
+
+    const { data: mission } = await supabase
+      .from('call_missions')
+      .select('case_id')
+      .eq('id', missionId)
+      .single();
+
+    for (const field of fieldMap) {
+      const value = structuredResults[field.valueKey];
+      if (value == null || value === '') continue;
+
+      await supabase.from('call_result_fields').insert({
+        id: uuidv4(),
+        call_result_id: callResultId,
+        field_key: field.key,
+        field_label: field.label,
+        extracted_value: value,
+        confidence: 1,
+        evidence_segment_ids: [],
+        review_status: 'pending',
+      });
+
+      if (
+        mission &&
+        ['claim_number', 'adjuster_name', 'adjuster_phone', 'adjuster_email'].includes(
+          field.key,
+        )
+      ) {
+        await supabase.from('call_proposed_updates').insert({
+          id: uuidv4(),
+          call_mission_id: missionId,
+          target_type: 'case',
+          target_id: mission.case_id,
+          target_field: field.key,
+          current_value: null,
+          proposed_value: value,
+          reason: 'Collected during mock call scenario.',
+          review_status: 'pending',
+        });
+      }
+    }
 
     await supabase
       .from('call_sessions')

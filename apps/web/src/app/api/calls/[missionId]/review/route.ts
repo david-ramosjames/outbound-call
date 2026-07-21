@@ -23,6 +23,44 @@ export async function PATCH(
   }
 
   const body = await request.json();
+  const { action } = body as { action?: string };
+
+  if (action === 'complete_review') {
+    const { data: mission } = await supabase
+      .from('call_missions')
+      .select('id, status')
+      .eq('id', missionId)
+      .single();
+
+    if (!mission) {
+      return NextResponse.json({ error: 'Mission not found' }, { status: 404 });
+    }
+
+    if (mission.status !== 'awaiting_review' && mission.status !== 'completed') {
+      return NextResponse.json(
+        { error: `Cannot complete review from status "${mission.status}"` },
+        { status: 400 },
+      );
+    }
+
+    const { error } = await supabase
+      .from('call_missions')
+      .update({
+        status: 'reviewed',
+      })
+      .eq('id', missionId);
+
+    if (error) {
+      console.error('[review] complete_review failed', error);
+      return NextResponse.json(
+        { error: error.message || 'Failed to complete review' },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ success: true, status: 'reviewed' });
+  }
+
   const { fieldId, reviewStatus, reviewedValue } = body;
 
   if (!fieldId || !reviewStatus) {

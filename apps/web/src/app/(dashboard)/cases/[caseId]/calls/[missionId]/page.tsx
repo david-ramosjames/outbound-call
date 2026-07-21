@@ -79,7 +79,10 @@ export default function MissionDetailPage() {
   const [proposedUpdates, setProposedUpdates] = useState<ProposedUpdate[]>([]);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [summary, setSummary] = useState<string>('');
+  const [xaiStatus, setXaiStatus] = useState<string | null>(null);
+  const [xaiCallId, setXaiCallId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [completingReview, setCompletingReview] = useState(false);
   const [highlightedSegments, setHighlightedSegments] = useState<string[]>([]);
 
   const loadData = useCallback(async () => {
@@ -91,13 +94,28 @@ export default function MissionDetailPage() {
       .eq('id', missionId)
       .single();
 
-    if (missionData) setMission(missionData as CallMission);
+    if (missionData) {
+      setMission(missionData as CallMission);
+    }
+
+    const { data: sessionData } = await supabase
+      .from('call_sessions')
+      .select('xai_connection_status, xai_call_id')
+      .eq('call_mission_id', missionId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (sessionData) {
+      setXaiStatus(sessionData.xai_connection_status ?? null);
+      setXaiCallId(sessionData.xai_call_id ?? null);
+    }
 
     const { data: resultData } = await supabase
       .from('call_results')
       .select('*')
       .eq('call_mission_id', missionId)
-      .single();
+      .maybeSingle();
 
     if (resultData) {
       setSummary(resultData.summary ?? '');
@@ -108,7 +126,43 @@ export default function MissionDetailPage() {
         .eq('call_result_id', resultData.id)
         .order('created_at');
 
-      if (fields) setResultFields(fields as CallResultField[]);
+      if (fields && fields.length > 0) {
+        setResultFields(fields as CallResultField[]);
+      } else {
+        // Backfill display from structured_results when field rows were never written
+        const structured = (resultData.structured_results ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const fallbackKeys: Array<{ key: string; label: string; valueKey: string }> = [
+          { key: 'claim_number', label: 'Claim Number', valueKey: 'claimNumber' },
+          { key: 'adjuster_name', label: 'Adjuster Name', valueKey: 'adjusterName' },
+          { key: 'adjuster_phone', label: 'Adjuster Phone', valueKey: 'adjusterPhone' },
+          { key: 'adjuster_email', label: 'Adjuster Email', valueKey: 'adjusterEmail' },
+          {
+            key: 'representative_name',
+            label: 'Representative Name',
+            valueKey: 'representativeName',
+          },
+        ];
+        setResultFields(
+          fallbackKeys
+            .filter((f) => structured[f.valueKey] != null && structured[f.valueKey] !== '')
+            .map((f) => ({
+              id: `structured-${f.key}`,
+              field_key: f.key,
+              field_label: f.label,
+              extracted_value: structured[f.valueKey],
+              confidence: 1,
+              evidence_segment_ids: [],
+              review_status: 'pending' as ReviewStatus,
+              reviewed_value: null,
+            })),
+        );
+      }
+    } else {
+      setSummary('');
+      setResultFields([]);
     }
 
     const { data: updates } = await supabase
@@ -150,7 +204,14 @@ export default function MissionDetailPage() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (mission?.status === 'awaiting_review') {
+      setActiveTab((prev) => (prev === 'overview' ? 'summary' : prev));
+    }
+  }, [mission?.status]);
+
   const handleAcceptField = async (fieldId: string) => {
+    if (fieldId.startsWith('structured-')) return;
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -167,6 +228,7 @@ export default function MissionDetailPage() {
   };
 
   const handleEditField = async (fieldId: string, newValue: string) => {
+    if (fieldId.startsWith('structured-')) return;
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -190,6 +252,7 @@ export default function MissionDetailPage() {
   };
 
   const handleRejectField = async (fieldId: string) => {
+    if (fieldId.startsWith('structured-')) return;
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -264,6 +327,25 @@ export default function MissionDetailPage() {
     loadData();
   };
 
+  const handleCompleteReview = async () => {
+    setCompletingReview(true);
+    try {
+      const response = await fetch(`/api/calls/${missionId}/review`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'complete_review' }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        alert(data.error ?? 'Failed to complete review');
+        return;
+      }
+      setMission((prev) => (prev ? { ...prev, status: 'reviewed' } : prev));
+    } finally {
+      setCompletingReview(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -304,7 +386,7 @@ export default function MissionDetailPage() {
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div className="flex-1">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-slate-900">{mission.title}</h1>
             <CallStatusBadge status={mission.status} />
             <OutcomeBadge outcome={mission.outcome} />
@@ -314,7 +396,33 @@ export default function MissionDetailPage() {
             {formatPhoneNumber(mission.destination_phone)}
           </p>
         </div>
+        {mission.status === 'awaiting_review' && (
+          <Button onClick={handleCompleteReview} disabled={completingReview}>
+            {completingReview ? 'Saving…' : 'Mark Review Complete'}
+          </Button>
+        )}
       </div>
+
+      {mission.status === 'awaiting_review' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-900">Review required</p>
+          <p className="text-sm text-amber-800 mt-1">
+            Open the Summary, Proposed Updates, and Transcript tabs. Accept or reject
+            extracted fields and case updates, then click <strong>Mark Review Complete</strong>.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <Button size="sm" variant="outline" onClick={() => setActiveTab('summary')}>
+              Summary ({resultFields.length})
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setActiveTab('updates')}>
+              Updates ({proposedUpdates.length})
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setActiveTab('transcript')}>
+              Transcript ({transcript.length})
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="border-b border-slate-200">
         <nav className="flex gap-1 -mb-px">
@@ -472,9 +580,13 @@ export default function MissionDetailPage() {
           )}
 
           {!summary && resultFields.length === 0 && (
-            <div className="text-center py-12">
+            <div className="text-center py-12 space-y-2">
               <p className="text-slate-500">
-                No results available yet. Results will appear after the call completes.
+                No summary or extracted fields yet.
+              </p>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                These appear after the voice session finishes and post-call processing
+                runs. If the call never joined xAI (no transcript), results will stay empty.
               </p>
             </div>
           )}
@@ -518,9 +630,14 @@ export default function MissionDetailPage() {
           )}
 
           {proposedUpdates.length === 0 && (
-            <div className="text-center py-12">
+            <div className="text-center py-12 space-y-2">
               <p className="text-slate-500">
-                No proposed updates. Updates will appear after call results are processed.
+                No proposed case updates for this call.
+              </p>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Updates are created when the bot records claim number, adjuster name,
+                phone, or email during the live session. Check the Summary tab for any
+                extracted values that were saved without a proposed update row.
               </p>
             </div>
           )}
@@ -535,9 +652,12 @@ export default function MissionDetailPage() {
               highlightedSegmentIds={highlightedSegments}
             />
           ) : (
-            <div className="text-center py-12">
-              <p className="text-slate-500">
-                No transcript available. The transcript will appear during or after the call.
+            <div className="text-center py-12 space-y-2">
+              <p className="text-slate-500">No transcript available for this call.</p>
+              <p className="text-xs text-slate-400 max-w-lg mx-auto">
+                {!xaiCallId
+                  ? 'The xAI SIP session never joined (no call_id). Twilio connected, but the voice agent WebSocket did not start — so nothing was transcribed. Confirm the xAI Direct SIP webhook points to your voice worker /webhooks/xai/sip.'
+                  : `xAI status: ${xaiStatus ?? 'unknown'}. Transcripts are saved live from the xAI WebSocket; if the socket dropped before speech events, segments will be empty.`}
               </p>
             </div>
           )}

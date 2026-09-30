@@ -46,7 +46,9 @@ export function ContextStep({
               The following are <strong>never</strong> disclosed:{' '}
               {RESTRICTED_FIELDS.map((f) => f.replace(/_/g, ' ')).join(', ')}.
               If an IVR asks for SSN, the bot should say it does not have it and
-              continue with DOB, phone, ZIP, policy, or claim number instead.
+              continue with DOB, phone, ZIP, policy, or claim number instead. The
+              bot will never discuss the client&apos;s injuries, medical status, fault,
+              or liability, so don&apos;t enter them in any field.
             </p>
           </div>
         </div>

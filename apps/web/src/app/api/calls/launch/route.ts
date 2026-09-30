@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { normalizePhoneNumber, isValidE164, isWithinCallingHours } from '@outbound-call/shared';
+import {
+  normalizePhoneNumber,
+  isValidE164,
+  isWithinCallingHours,
+  isNeverDisclosedField,
+} from '@outbound-call/shared';
 import { canLaunchCalls } from '@/lib/permissions';
 
 export async function POST(request: NextRequest) {
@@ -115,19 +120,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const approvedContext = (contextFields ?? []).map((f: {
-    field: string;
-    label: string;
-    value: string;
-    included: boolean;
-    missionSpecificValue?: string;
-  }) => ({
-    field: f.field,
-    label: f.label,
-    value: f.missionSpecificValue || f.value,
-    included: f.included,
-    missionSpecificValue: f.missionSpecificValue,
-  }));
+  const approvedContext = (contextFields ?? [])
+    .filter((f: { field: string }) => !isNeverDisclosedField(f.field))
+    .map((f: {
+      field: string;
+      label: string;
+      value: string;
+      included: boolean;
+      missionSpecificValue?: string;
+    }) => ({
+      field: f.field,
+      label: f.label,
+      value: f.missionSpecificValue || f.value,
+      included: f.included,
+      missionSpecificValue: f.missionSpecificValue,
+    }));
 
   const authorizationSnapshot = {
     authorizedBy: user.id,

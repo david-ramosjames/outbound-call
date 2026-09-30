@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
+import {
+  BODILY_INJURY_LIABILITY_REFUSAL,
+  isNeverDisclosedField,
+} from '@outbound-call/shared';
 import type { CallMission } from '@outbound-call/shared';
 
 // --- Zod schemas for tool arguments ---
@@ -120,6 +124,18 @@ export async function handleGetApprovedCaseField(
     callSessionId: ctx.callSessionId,
     eventType: 'tool_call_requested',
   });
+
+  if (isNeverDisclosedField(args.fieldKey)) {
+    await saveCallEvent(ctx.missionId, ctx.callSessionId, 'tool_call_requested', {
+      tool: 'get_approved_case_field',
+      fieldKey: args.fieldKey,
+      result: 'blocked_never_disclose',
+    });
+    return JSON.stringify({
+      error: 'field_never_disclosed',
+      message: `Never discuss this. Say exactly: "${BODILY_INJURY_LIABILITY_REFUSAL}"`,
+    });
+  }
 
   const field = ctx.mission.approvedContext.find(
     (c) => c.field === args.fieldKey && c.included

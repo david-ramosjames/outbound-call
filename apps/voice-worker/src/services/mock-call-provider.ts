@@ -319,7 +319,7 @@ export class MockCallProvider {
 
     let seq = 1;
     await this.emitTranscript(missionId, callSessionId, 'ai_agent',
-      "Hello, I'm an AI-assisted calling agent contacting you on behalf of Ramos James Law regarding a client insurance matter. I'd like to open a new bodily-injury claim.", seq++);
+      "Hello, I'm an AI-assisted calling agent contacting you on behalf of Ramos James Law regarding a client insurance matter. I'd like to open a new claim.", seq++);
     await sleep(2000);
 
     await this.emitTranscript(missionId, callSessionId, 'insurance_representative',

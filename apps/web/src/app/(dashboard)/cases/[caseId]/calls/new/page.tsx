@@ -109,7 +109,7 @@ export default function NewCallPage() {
       supabase.from('cases').select('*').eq('id', caseId).single(),
       supabase
         .from('case_tracker_entries')
-        .select('injuries, case_description, attorney_name, client_phone')
+        .select('attorney_name, client_phone')
         .eq('case_id', caseId)
         .eq('is_active', true)
         .limit(1)
@@ -130,8 +130,6 @@ export default function NewCallPage() {
       client_phone_number: trackerData?.client_phone || caseData.client_phone,
       date_of_loss: caseData.date_of_incident,
       case_type: caseData.case_type,
-      brief_incident_description: trackerData?.case_description ?? caseData.notes,
-      injuries: trackerData?.injuries,
       attorney_name: trackerData?.attorney_name,
       law_firm_name: 'Ramos James Law',
       law_firm_phone_number: '(512) 537-3369',
@@ -139,7 +137,7 @@ export default function NewCallPage() {
       policy_type: 'auto',
       incident_type: 'accident',
       accident_state: 'Texas',
-      policyholder_status: 'No — attorney calling on behalf of injured party',
+      policyholder_status: 'No — attorney calling on behalf of the client (third party)',
     };
 
     setContextFields((prev) =>

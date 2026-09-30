@@ -21,9 +21,9 @@ export const missionTemplateSchema = z.object({
 export type MissionTemplate = z.infer<typeof missionTemplateSchema>;
 
 const SHARED_RESTRICTED = [
+  "The client's injuries, symptoms, medical condition, treatment, prognosis, or bodily-injury status — never disclose, confirm, deny, characterize, or speculate (including never saying the client is uninjured or fine)",
+  'Fault, liability, or how the accident happened in a way that assigns blame',
   'Settlement value negotiation beyond confirming amounts the carrier already stated',
-  'Liability admissions',
-  'Detailed medical diagnoses or treatment history',
   'Legal strategy',
   'Client statements beyond confirming identity',
   'Social security numbers',
@@ -36,7 +36,6 @@ const SHARED_ESCALATION = [
   'The representative requests a client statement',
   'The representative requests an attorney statement',
   'Settlement negotiation beyond the mission scope is requested',
-  'Liability admissions are requested',
   'The AI is asked to verify identity using unavailable or restricted data (e.g. SSN)',
   'A dispute develops that cannot be resolved with approved facts',
   'Sensitive information outside the approved context is requested',
@@ -117,12 +116,12 @@ export const REQUEST_ADJUSTER_CONTACT_TEMPLATE = {
   name: 'Get Adjuster / Transfer',
   missionType: 'request_adjuster_contact' as const,
   description:
-    'Identify the PD / total-loss / injury / PIP adjuster and get contact info or a warm transfer.',
+    'Identify the PD / total-loss / BI / PIP adjuster and get contact info or a warm transfer.',
   defaultGoal:
     'Identify the correct adjuster for this claim and obtain direct contact information or a transfer.',
   defaultObjectives: [
     'Navigate to claims and verify the existing claim',
-    'Ask for the relevant adjuster (PD, total loss, PIP, UIM, injury team)',
+    'Ask for the relevant adjuster (PD, total loss, PIP, UIM, BI) by department name only — do not describe the client\'s condition',
     'Spell and confirm adjuster name',
     'Obtain direct phone and/or extension',
     'Obtain email if available',
@@ -187,11 +186,7 @@ export const PIP_FOLLOW_UP_TEMPLATE = {
   defaultSuccessCriteria: [
     'PIP payment status is clarified with a named contact or complete voicemail left',
   ],
-  defaultAllowedDisclosures: [
-    ...SHARED_DISCLOSURES,
-    'That a PIP demand was sent',
-    'Approximate medical bill totals already in the approved notes',
-  ],
+  defaultAllowedDisclosures: [...SHARED_DISCLOSURES, 'That a PIP demand was sent'],
   defaultRestrictedTopics: [...SHARED_RESTRICTED],
   defaultEscalationRules: [...SHARED_ESCALATION],
   expectedOutputSchema: null,

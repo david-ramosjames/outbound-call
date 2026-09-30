@@ -72,8 +72,7 @@ export const APPROVED_CONTEXT_FIELDS = [
   'documents_previously_sent',
   'preferred_document_delivery',
 
-  // Injuries / notes
-  'injuries',
+  // Other notes
   'police_report_number',
   'other_approved_notes',
 ] as const;
@@ -111,7 +110,7 @@ export const CONTEXT_FIELD_LABELS: Record<ApprovedContextField, string> = {
   location_of_loss: 'Location of Loss',
   incident_type: 'Incident Type (accident, glass, roadside, etc.)',
   case_type: 'Case Type',
-  brief_incident_description: 'Brief Incident Description',
+  brief_incident_description: 'Brief Incident Description (no injuries or fault)',
 
   vehicle_year: 'Vehicle Year',
   vehicle_make: 'Vehicle Make',
@@ -130,9 +129,8 @@ export const CONTEXT_FIELD_LABELS: Record<ApprovedContextField, string> = {
   documents_previously_sent: 'Documents Previously Sent',
   preferred_document_delivery: 'Preferred Document Delivery (email / fax)',
 
-  injuries: 'Injuries (high-level)',
   police_report_number: 'Police Report Number',
-  other_approved_notes: 'Other Approved Notes',
+  other_approved_notes: 'Other Approved Notes (no injuries or fault)',
 };
 
 export const CONTEXT_FIELD_PLACEHOLDERS: Partial<
@@ -145,7 +143,7 @@ export const CONTEXT_FIELD_PLACEHOLDERS: Partial<
   client_zip_code: 'e.g. 78704',
   policy_number: 'e.g. 4578908453',
   policy_type: 'auto',
-  policyholder_status: 'No — calling as attorney for injured party',
+  policyholder_status: 'No — calling as attorney for the client (third party)',
   existing_claim_number: 'e.g. 8896594470000001 or 53-60M2-24J',
   claim_number_spoken:
     'e.g. eight eight nine… then zero zero zero zero zero zero one',
@@ -271,9 +269,10 @@ export const CONTEXT_FIELD_GROUPS: readonly ContextFieldGroup[] = [
   },
   {
     id: 'other',
-    title: 'Injuries & other notes',
-    description: 'High-level injury notes and anything else approved for this call.',
-    fields: ['injuries', 'police_report_number', 'other_approved_notes'],
+    title: 'Other notes',
+    description:
+      'Anything else approved for this call. Never enter injuries, medical details, or fault/liability statements.',
+    fields: ['police_report_number', 'other_approved_notes'],
   },
 ] as const;
 
@@ -285,9 +284,15 @@ export const RESTRICTED_FIELDS = [
   'social_security_number',
   'banking_information',
   'payment_card_information',
-  'full_medical_records',
-  'detailed_diagnoses',
-  'treatment_history',
+  'injuries',
+  'symptoms',
+  'medical_condition',
+  'medical_treatment',
+  'medical_records',
+  'diagnoses',
+  'prognosis',
+  'bodily_injury_status',
+  'fault_or_liability',
   'settlement_strategy',
   'internal_attorney_analysis',
   'unrelated_case_notes',
@@ -295,6 +300,24 @@ export const RESTRICTED_FIELDS = [
 ] as const;
 
 export type RestrictedField = (typeof RESTRICTED_FIELDS)[number];
+
+/**
+ * Field keys that must never reach the voice agent, even if a stored mission
+ * (or a hand-edited request) marks them as included.
+ */
+const NEVER_DISCLOSED_FIELD_PATTERN =
+  /injur|symptom|medical|treatment|diagnos|prognos|bodily|health|fault|liabil/i;
+
+export function isNeverDisclosedField(field: string): boolean {
+  return (
+    (RESTRICTED_FIELDS as readonly string[]).includes(field) ||
+    NEVER_DISCLOSED_FIELD_PATTERN.test(field)
+  );
+}
+
+/** Statement the agent must use when asked about injuries, medical status, fault, or liability. */
+export const BODILY_INJURY_LIABILITY_REFUSAL =
+  "I'm not authorized to discuss the client's injuries, medical condition, or any fault or liability questions. Please contact our firm directly regarding bodily-injury or liability matters.";
 
 export interface ApprovedContextEntry {
   field: ApprovedContextField;

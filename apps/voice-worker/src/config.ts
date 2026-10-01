@@ -12,6 +12,7 @@ const envSchema = z.object({
   XAI_SIP_URI: isMock ? z.string().default('sip:mock@localhost') : z.string().min(1),
   XAI_SIP_WEBHOOK_SECRET: isMock ? z.string().default('mock-webhook-secret') : z.string().min(1),
   XAI_REALTIME_URL: z.string().url().default('wss://api.x.ai/v1/realtime'),
+  XAI_SUMMARY_MODEL: z.string().default('grok-4'),
 
   TWILIO_ACCOUNT_SID: isMock ? z.string().default('mock-twilio-sid') : z.string().min(1),
   TWILIO_AUTH_TOKEN: isMock ? z.string().default('mock-twilio-token') : z.string().min(1),

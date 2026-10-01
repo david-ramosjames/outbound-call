@@ -7,6 +7,8 @@ import {
   type ProvisionalResult,
 } from './grok-tools.js';
 import type { MissionOutcome } from '@outbound-call/shared';
+import { config } from '../config.js';
+import { summarizeTranscript } from './transcript-summarizer.js';
 
 const FIELD_LABELS: Record<string, string> = {
   claim_number: 'Claim Number',
@@ -37,7 +39,27 @@ export async function processCallResults(missionId: string): Promise<void> {
   logger.info('Starting post-call processing', logCtx);
 
   // Collect provisional results
-  const results = getProvisionalResults(missionId);
+  const results = [...getProvisionalResults(missionId)];
+
+  const transcriptSummary =
+    config.VOICE_MODE === 'live' ? await summarizeTranscript(missionId) : null;
+
+  if (transcriptSummary) {
+    const recordedKeys = new Set(results.map((r) => r.fieldKey));
+    for (const [fieldKey, value] of Object.entries(
+      transcriptSummary.extractedFields
+    )) {
+      if (!value || recordedKeys.has(fieldKey)) continue;
+      results.push({
+        fieldKey,
+        value,
+        confirmationStatus: 'unconfirmed',
+        representativeAttribution: 'extracted from transcript',
+        supportingQuote: '',
+        recordedAt: new Date().toISOString(),
+      });
+    }
+  }
 
   // Gather tool call events for missing info, documents, escalations
   const { data: events } = await supabase
@@ -60,7 +82,7 @@ export async function processCallResults(missionId: string): Promise<void> {
     deadline: string | null;
   }> = [];
   let escalationReason: string | null = null;
-  let completionStatus = 'success';
+  let completionStatus = 'not_reported';
 
   for (const ev of events ?? []) {
     const payload = ev.event_payload as Record<string, unknown> | null;
@@ -123,14 +145,16 @@ export async function processCallResults(missionId: string): Promise<void> {
     carrierMailingAddress: get('carrier_mailing_address'),
     requestedDocuments: requestedDocs,
     missingInformation: missingInfo,
-    commitments: [] as string[],
+    commitments: transcriptSummary?.commitments ?? [],
     deadlines: [] as Array<{ description: string; date: string | null }>,
     nextAction: missingInfo.length > 0
       ? missingInfo[0]!.suggestedNextStep
-      : null,
+      : transcriptSummary?.nextAction ?? null,
     suggestedFollowUpDate: null as string | null,
     escalationReason,
-    summary: buildSummary(missionOutcome, results, missingInfo),
+    summary: transcriptSummary
+      ? `${buildSummary(missionOutcome, results, missingInfo)}\n\n${transcriptSummary.summary}`
+      : buildSummary(missionOutcome, results, missingInfo),
     confidence: buildConfidenceMap(results),
     evidence: buildEvidenceMap(results),
   };

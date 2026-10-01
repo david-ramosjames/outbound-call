@@ -33,6 +33,11 @@ async function fetchAllActiveCases(): Promise<{
     from += PAGE_SIZE;
   }
 
+  // case_number is text ("980", "1706"), so compare numerically rather than in SQL.
+  all.sort((a, b) =>
+    (b.case_number ?? '').localeCompare(a.case_number ?? '', undefined, { numeric: true }),
+  );
+
   return { cases: all, error: null };
 }
 

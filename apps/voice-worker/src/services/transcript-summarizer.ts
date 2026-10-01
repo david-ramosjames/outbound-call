@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OUTCOME_REASONS } from '@outbound-call/shared';
 import { supabase } from '../lib/supabase.js';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
@@ -10,7 +11,9 @@ const SummarySchema = z.object({
       claim_number: z.string().nullable().optional(),
       adjuster_name: z.string().nullable().optional(),
       adjuster_phone: z.string().nullable().optional(),
+      adjuster_fax: z.string().nullable().optional(),
       adjuster_email: z.string().nullable().optional(),
+      adjuster_mailing_address: z.string().nullable().optional(),
       carrier_fax: z.string().nullable().optional(),
       carrier_mailing_address: z.string().nullable().optional(),
       representative_name: z.string().nullable().optional(),
@@ -20,6 +23,7 @@ const SummarySchema = z.object({
     .default({}),
   commitments: z.array(z.string()).default([]),
   nextAction: z.string().nullable().optional(),
+  outcomeReason: z.enum(OUTCOME_REASONS).nullable().optional().catch(null),
 });
 
 export type TranscriptSummary = z.infer<typeof SummarySchema>;
@@ -34,10 +38,18 @@ Strict rules:
 - If those topics came up, write only: "Carrier raised bodily-injury/liability questions; agent declined and referred them to the firm."
 - Only report facts stated in the transcript. Do not invent values.
 
-Also extract any of these values if clearly stated by the carrier representative: claim_number, adjuster_name, adjuster_phone, adjuster_email, carrier_fax, carrier_mailing_address, representative_name, representative_department. Use null when not stated.
+Also extract any of these values if clearly stated by the carrier representative: claim_number, adjuster_name, adjuster_phone, adjuster_fax, adjuster_email, adjuster_mailing_address, carrier_fax, carrier_mailing_address, representative_name, representative_department. Use null when not stated. Use the final corrected value if the representative corrected themselves.
+
+Classify outcomeReason as exactly one of:
+- "completed": claim number and adjuster contact details were obtained
+- "ai_declined_restricted_request": the call stalled because the carrier insisted on information the agent may not share
+- "carrier_refused_ai": the representative would not continue with an AI caller
+- "unable_to_reach_representative": never reached a human (IVR dead end, hold, voicemail)
+- "missing_required_information": a claim exists but some claim/adjuster details were not obtained
+- "human_follow_up_required": anything else that needs a person from the firm
 
 Respond with JSON only:
-{"summary": string, "extractedFields": {...}, "commitments": string[], "nextAction": string | null}`;
+{"summary": string, "extractedFields": {...}, "commitments": string[], "nextAction": string | null, "outcomeReason": string}`;
 
 const SPEAKER_LABELS: Record<string, string> = {
   ai_agent: 'Agent',

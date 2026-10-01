@@ -3,9 +3,53 @@ import { format } from 'date-fns';
 import { Phone, TrendingUp, Clock, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CallStatusBadge, OutcomeBadge } from '@/components/calls/call-status-badge';
+import {
+  CallStatusBadge,
+  OutcomeBadge,
+  OutcomeReasonBadge,
+} from '@/components/calls/call-status-badge';
 import { formatDuration, formatPhoneNumber } from '@/lib/utils';
-import type { CallStatus, MissionOutcome } from '@outbound-call/shared';
+import {
+  MISSION_TYPE_LABELS,
+  OUTCOME_REASONS,
+  OUTCOME_REASON_LABELS,
+  isOutcomeReason,
+} from '@outbound-call/shared';
+import type { CallStatus, MissionOutcome, MissionType, OutcomeReason } from '@outbound-call/shared';
+
+interface CarrierOutcomeRow {
+  carrier: string;
+  missionType: string;
+  total: number;
+  counts: Record<OutcomeReason, number>;
+}
+
+function buildCarrierOutcomes(
+  calls: Array<{ organization_name: string; mission_type: string; outcome_reason?: string | null }>,
+): CarrierOutcomeRow[] {
+  const rows = new Map<string, CarrierOutcomeRow>();
+  for (const call of calls) {
+    if (!isOutcomeReason(call.outcome_reason)) continue;
+    const carrier = call.organization_name?.trim() || 'Unknown';
+    const key = `${carrier.toLowerCase()}|${call.mission_type}`;
+    let row = rows.get(key);
+    if (!row) {
+      row = {
+        carrier,
+        missionType: call.mission_type,
+        total: 0,
+        counts: Object.fromEntries(OUTCOME_REASONS.map((r) => [r, 0])) as Record<
+          OutcomeReason,
+          number
+        >,
+      };
+      rows.set(key, row);
+    }
+    row.total += 1;
+    row.counts[call.outcome_reason] += 1;
+  }
+  return [...rows.values()].sort((a, b) => b.total - a.total);
+}
 
 export default async function GlobalCallsPage() {
   const supabase = await createClient();
@@ -16,6 +60,14 @@ export default async function GlobalCallsPage() {
     .order('created_at', { ascending: false })
     .limit(50);
 
+  const { data: outcomeCalls } = await supabase
+    .from('call_missions')
+    .select('organization_name, mission_type, outcome_reason')
+    .not('outcome_reason', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1000);
+
+  const carrierOutcomes = buildCarrierOutcomes(outcomeCalls ?? []);
   const allCalls = calls ?? [];
   const totalCalls = allCalls.length;
   const completedCalls = allCalls.filter((c) => c.status === 'completed');
@@ -77,6 +129,53 @@ export default async function GlobalCallsPage() {
         </Card>
       </div>
 
+      {carrierOutcomes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Outcomes by Carrier</CardTitle>
+            <p className="text-sm text-slate-500 font-normal">
+              How each carrier and call type has gone with the AI caller.
+            </p>
+          </CardHeader>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="text-left px-6 py-3 font-medium text-slate-500">Carrier</th>
+                  <th className="text-left px-6 py-3 font-medium text-slate-500">Call Type</th>
+                  <th className="text-right px-3 py-3 font-medium text-slate-500">Calls</th>
+                  {OUTCOME_REASONS.map((r) => (
+                    <th key={r} className="text-right px-3 py-3 font-medium text-slate-500">
+                      {OUTCOME_REASON_LABELS[r]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {carrierOutcomes.map((row) => (
+                  <tr key={`${row.carrier}|${row.missionType}`}>
+                    <td className="px-6 py-3 font-medium text-slate-900">{row.carrier}</td>
+                    <td className="px-6 py-3 text-slate-600">
+                      {MISSION_TYPE_LABELS[row.missionType as MissionType] ??
+                        row.missionType.replace(/_/g, ' ')}
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums">{row.total}</td>
+                    {OUTCOME_REASONS.map((r) => (
+                      <td
+                        key={r}
+                        className="px-3 py-3 text-right tabular-nums text-slate-600"
+                      >
+                        {row.counts[r] || '–'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Recent Calls</CardTitle>
@@ -122,7 +221,10 @@ export default async function GlobalCallsPage() {
                       </p>
                     </td>
                     <td className="px-6 py-3">
-                      <OutcomeBadge outcome={call.outcome as MissionOutcome | null} />
+                      <div className="flex flex-col items-start gap-1">
+                        <OutcomeBadge outcome={call.outcome as MissionOutcome | null} />
+                        <OutcomeReasonBadge reason={call.outcome_reason} />
+                      </div>
                     </td>
                     <td className="px-6 py-3 text-slate-600 tabular-nums">
                       {formatDuration(call.duration_seconds)}

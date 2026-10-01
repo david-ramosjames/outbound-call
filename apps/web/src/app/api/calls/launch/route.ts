@@ -5,6 +5,7 @@ import {
   isValidE164,
   isWithinCallingHours,
   isNeverDisclosedField,
+  SELECTABLE_MISSION_TYPES,
 } from '@outbound-call/shared';
 import { canLaunchCalls } from '@/lib/permissions';
 
@@ -47,8 +48,15 @@ export async function POST(request: NextRequest) {
     contextFields,
     instructions,
     callingHoursOverride = false,
-    missionType = 'open_insurance_claim',
+    missionType = 'open_claim_third_party',
   } = body;
+
+  if (!(SELECTABLE_MISSION_TYPES as readonly string[]).includes(missionType)) {
+    return NextResponse.json(
+      { error: `Unknown call type: ${missionType}` },
+      { status: 400 },
+    );
+  }
 
   if (!caseId || !destination?.phoneNumber || !destination?.organizationName) {
     return NextResponse.json(

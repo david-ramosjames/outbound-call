@@ -36,7 +36,7 @@ const SHARED_ESCALATION = [
   'The representative requests a client statement',
   'The representative requests an attorney statement',
   'Settlement negotiation beyond the mission scope is requested',
-  'The AI is asked to verify identity using unavailable or restricted data (e.g. SSN)',
+  'The carrier will not proceed without identity data the AI does not have approved (e.g. SSN, DOB)',
   'A dispute develops that cannot be resolved with approved facts',
   'Sensitive information outside the approved context is requested',
   'A representative refuses to speak with an AI',
@@ -48,21 +48,80 @@ const SHARED_ESCALATION = [
 const SHARED_DISCLOSURES = [
   'Law firm name and contact information',
   'Caller / attorney name',
-  'Client name and DOB when approved',
-  'Client phone and ZIP when approved',
+  'Client name',
   'Date of loss',
   'Policy number when available',
   'Claim number when available',
   'Vehicle year/make/model when available',
   'Representation status',
   'High-level purpose of the call',
+  'Only the minimum needed to open or locate the claim, and only when asked',
 ] as const;
 
+const REQUIRED_OUTPUT_OBJECTIVE =
+  'Before ending, obtain the claim number plus the adjuster’s full name, phone, fax, email, and mailing address (needed for the Letter of Representation). If no adjuster is assigned yet, get the general claims fax, email, and mailing address.';
+
+export const OPEN_CLAIM_THIRD_PARTY_TEMPLATE = {
+  name: 'Open Claim — Third Party',
+  missionType: 'open_claim_third_party' as const,
+  description:
+    "Open a third-party claim for our client against the other driver's policy. The insured is the other driver, not our client.",
+  defaultGoal:
+    "Open a third-party claim on behalf of the firm's client against the carrier's insured, and leave with the claim number and full adjuster contact information.",
+  defaultObjectives: [
+    'Navigate the carrier IVR: claims → report/file a new claim → not a policyholder / third party / attorney',
+    "Identify as calling from the law firm on behalf of our client, who is a claimant against the carrier's insured",
+    "Provide only what is needed to open the claim: the insured's name, the insured's policy number if known, date of loss, location, the client's name, and the client's role (e.g. driver/passenger)",
+    'If a claim already exists for this loss, get that claim number instead of opening a duplicate',
+    REQUIRED_OUTPUT_OBJECTIVE,
+    'Note any documents the carrier asks the firm to send',
+  ],
+  defaultSuccessCriteria: [
+    'A claim number is obtained (new or existing)',
+    'Adjuster name, phone, fax, email, and mailing address are recorded — or the reason any are unavailable',
+  ],
+  defaultAllowedDisclosures: [
+    ...SHARED_DISCLOSURES,
+    "The carrier's insured's name and vehicle, as provided in approved context",
+    "The client's role in the loss (driver, passenger, pedestrian) — never how the accident happened or who caused it",
+  ],
+  defaultRestrictedTopics: [...SHARED_RESTRICTED],
+  defaultEscalationRules: [...SHARED_ESCALATION],
+  expectedOutputSchema: null,
+  isActive: true,
+} as const;
+
+export const OPEN_CLAIM_FIRST_PARTY_TEMPLATE = {
+  name: 'Open Claim — First Party / UM-UIM',
+  missionType: 'open_claim_first_party' as const,
+  description:
+    "Open a first-party (UM/UIM) claim under our client's own policy. Our client — or their household member — is the insured.",
+  defaultGoal:
+    "Open a first-party UM/UIM claim under the client's own policy on the firm's behalf, and leave with the claim number and full adjuster contact information.",
+  defaultObjectives: [
+    'Navigate the carrier IVR: claims → report/file a new claim → attorney / calling on behalf of the policyholder',
+    "Identify as calling from the law firm on behalf of the carrier's own insured (our client)",
+    "Provide only what is needed to locate the policy and open the claim: the insured's name, policy number, date of loss, location, and vehicle",
+    'Ask to open an uninsured / underinsured motorist (UM/UIM) claim; if a claim already exists for this loss, ask to have UM/UIM noted on that claim and get its number',
+    REQUIRED_OUTPUT_OBJECTIVE,
+    'Note any documents the carrier asks the firm to send',
+  ],
+  defaultSuccessCriteria: [
+    'A claim number is obtained (new or existing) with UM/UIM noted',
+    'Adjuster name, phone, fax, email, and mailing address are recorded — or the reason any are unavailable',
+  ],
+  defaultAllowedDisclosures: [...SHARED_DISCLOSURES],
+  defaultRestrictedTopics: [...SHARED_RESTRICTED],
+  defaultEscalationRules: [...SHARED_ESCALATION],
+  expectedOutputSchema: null,
+  isActive: true,
+} as const;
+
 export const OPEN_INSURANCE_CLAIM_TEMPLATE = {
-  name: 'Open Insurance Claim',
+  name: 'Open Insurance Claim (legacy)',
   missionType: 'open_insurance_claim' as const,
   description:
-    'Open a new claim (often as a third-party / non-policyholder attorney caller) and collect claim + adjuster info.',
+    'Legacy combined open-claim mission. New calls use the first-party or third-party types.',
   defaultGoal:
     "Open a new auto claim on behalf of the firm's client and collect the claim number plus any claims contact information.",
   defaultObjectives: [
@@ -70,8 +129,7 @@ export const OPEN_INSURANCE_CLAIM_TEMPLATE = {
     'Identify as calling from the law firm on behalf of the client',
     'Provide approved policy, client, date-of-loss, and vehicle information',
     'Open the claim or confirm if a claim already exists',
-    'Obtain the claim number and read it back digit-by-digit',
-    'Obtain adjuster name, phone, email, and/or general claims fax/email',
+    REQUIRED_OUTPUT_OBJECTIVE,
     'Identify any requested documentation and next steps',
   ],
   defaultSuccessCriteria: [
@@ -94,10 +152,10 @@ export const FOLLOW_UP_EXISTING_CLAIM_TEMPLATE = {
     'Reach the correct claims unit on an existing claim, confirm status, and collect the next action and contacts.',
   defaultObjectives: [
     'Navigate IVR for existing claim / claims / attorney path',
-    'Verify with claim number, client name, DOB, phone, and ZIP as needed',
+    'Verify with claim number, client name, and date of loss (only use other identifiers if approved and asked)',
     'State the call purpose clearly (status, total loss, PD, inspection follow-up, etc.)',
     'Confirm claim status and assigned department/adjuster',
-    'Collect direct phone, extension, and email when available',
+    REQUIRED_OUTPUT_OBJECTIVE,
     'Confirm any documents already on file and what still needs to be sent',
     'Record promised next steps and follow-up timing',
   ],
@@ -122,9 +180,7 @@ export const REQUEST_ADJUSTER_CONTACT_TEMPLATE = {
   defaultObjectives: [
     'Navigate to claims and verify the existing claim',
     'Ask for the relevant adjuster (PD, total loss, PIP, UIM, BI) by department name only — do not describe the client\'s condition',
-    'Spell and confirm adjuster name',
-    'Obtain direct phone and/or extension',
-    'Obtain email if available',
+    REQUIRED_OUTPUT_OBJECTIVE,
     'Accept a transfer when offered and re-introduce after transfer',
     'If voicemail, leave firm name, claim number, client name, callback number, and reason',
   ],
@@ -208,6 +264,8 @@ export type MissionTemplateDefaults = {
 };
 
 export const MISSION_TEMPLATES_BY_TYPE: Record<MissionType, MissionTemplateDefaults> = {
+  open_claim_third_party: OPEN_CLAIM_THIRD_PARTY_TEMPLATE,
+  open_claim_first_party: OPEN_CLAIM_FIRST_PARTY_TEMPLATE,
   open_insurance_claim: OPEN_INSURANCE_CLAIM_TEMPLATE,
   follow_up_existing_claim: FOLLOW_UP_EXISTING_CLAIM_TEMPLATE,
   request_adjuster_contact: REQUEST_ADJUSTER_CONTACT_TEMPLATE,
@@ -220,6 +278,46 @@ export const DEFAULT_INCLUDED_FIELDS_BY_MISSION: Record<
   MissionType,
   readonly string[]
 > = {
+  open_claim_third_party: [
+    'caller_name',
+    'law_firm_name',
+    'law_firm_phone_number',
+    'law_firm_email_address',
+    'law_firm_fax_number',
+    'law_firm_mailing_address',
+    'representation_status',
+    'client_full_name',
+    'client_role_in_loss',
+    'insured_name',
+    'insured_vehicle_description',
+    'insurance_carrier',
+    'policy_number',
+    'policyholder_status',
+    'date_of_loss',
+    'location_of_loss',
+    'accident_state',
+  ],
+  open_claim_first_party: [
+    'caller_name',
+    'law_firm_name',
+    'law_firm_phone_number',
+    'law_firm_email_address',
+    'law_firm_fax_number',
+    'law_firm_mailing_address',
+    'representation_status',
+    'client_full_name',
+    'insured_name',
+    'insurance_carrier',
+    'policy_number',
+    'policy_type',
+    'policyholder_status',
+    'date_of_loss',
+    'location_of_loss',
+    'accident_state',
+    'vehicle_year',
+    'vehicle_make',
+    'vehicle_model',
+  ],
   open_insurance_claim: [
     'caller_name',
     'law_firm_name',
@@ -227,9 +325,6 @@ export const DEFAULT_INCLUDED_FIELDS_BY_MISSION: Record<
     'law_firm_email_address',
     'representation_status',
     'client_full_name',
-    'client_date_of_birth',
-    'client_phone_number',
-    'client_zip_code',
     'accident_state',
     'insurance_carrier',
     'policy_number',
@@ -249,9 +344,6 @@ export const DEFAULT_INCLUDED_FIELDS_BY_MISSION: Record<
     'representation_status',
     'client_full_name',
     'client_name_phonetic',
-    'client_date_of_birth',
-    'client_phone_number',
-    'client_zip_code',
     'accident_state',
     'insurance_carrier',
     'policy_number',
@@ -269,9 +361,6 @@ export const DEFAULT_INCLUDED_FIELDS_BY_MISSION: Record<
     'law_firm_phone_number',
     'representation_status',
     'client_full_name',
-    'client_date_of_birth',
-    'client_phone_number',
-    'client_zip_code',
     'existing_claim_number',
     'claim_number_spoken',
     'date_of_loss',

@@ -9,18 +9,40 @@ import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CallStatusBadge, OutcomeBadge } from '@/components/calls/call-status-badge';
+import {
+  CallStatusBadge,
+  OutcomeBadge,
+  OutcomeReasonBadge,
+} from '@/components/calls/call-status-badge';
 import { TranscriptViewer } from '@/components/calls/transcript-viewer';
 import { ResultFieldReview } from '@/components/calls/result-field-review';
 import { ProposedUpdateCard } from '@/components/calls/proposed-update-card';
 import { formatDuration, formatPhoneNumber } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import {
+  MISSION_TYPE_LABELS,
+  REQUIRED_CLAIM_OUTPUT_FIELDS,
+  REQUIRED_CLAIM_OUTPUT_LABELS,
+} from '@outbound-call/shared';
 import type {
   CallStatus,
   MissionOutcome,
+  MissionType,
   TranscriptSegment,
   ReviewStatus,
 } from '@outbound-call/shared';
+
+const REQUIRED_OUTPUT_STRUCTURED_KEYS: Record<
+  (typeof REQUIRED_CLAIM_OUTPUT_FIELDS)[number],
+  string
+> = {
+  claim_number: 'claimNumber',
+  adjuster_name: 'adjusterName',
+  adjuster_phone: 'adjusterPhone',
+  adjuster_fax: 'adjusterFax',
+  adjuster_email: 'adjusterEmail',
+  adjuster_mailing_address: 'adjusterMailingAddress',
+};
 
 type Tab = 'overview' | 'summary' | 'updates' | 'transcript';
 
@@ -38,6 +60,7 @@ interface CallMission {
   goal: string;
   status: CallStatus;
   outcome: MissionOutcome | null;
+  outcome_reason?: string | null;
   created_by: string;
   authorized_by: string | null;
   authorized_at: string | null;
@@ -79,6 +102,7 @@ export default function MissionDetailPage() {
   const [proposedUpdates, setProposedUpdates] = useState<ProposedUpdate[]>([]);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [summary, setSummary] = useState<string>('');
+  const [structured, setStructured] = useState<Record<string, unknown> | null>(null);
   const [xaiStatus, setXaiStatus] = useState<string | null>(null);
   const [xaiCallId, setXaiCallId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +143,7 @@ export default function MissionDetailPage() {
 
     if (resultData) {
       setSummary(resultData.summary ?? '');
+      setStructured((resultData.structured_results ?? null) as Record<string, unknown> | null);
 
       const { data: fields } = await supabase
         .from('call_result_fields')
@@ -162,6 +187,7 @@ export default function MissionDetailPage() {
       }
     } else {
       setSummary('');
+      setStructured(null);
       setResultFields([]);
     }
 
@@ -365,6 +391,12 @@ export default function MissionDetailPage() {
     );
   }
 
+  const outcomeReason =
+    mission.outcome_reason ?? (structured?.outcomeReason as string | undefined) ?? null;
+  const missionTypeLabel =
+    MISSION_TYPE_LABELS[mission.mission_type as MissionType] ??
+    mission.mission_type.replace(/_/g, ' ');
+
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'summary', label: 'Summary', count: resultFields.length },
@@ -390,6 +422,7 @@ export default function MissionDetailPage() {
             <h1 className="text-2xl font-bold text-slate-900">{mission.title}</h1>
             <CallStatusBadge status={mission.status} />
             <OutcomeBadge outcome={mission.outcome} />
+            <OutcomeReasonBadge reason={outcomeReason} />
           </div>
           <p className="text-sm text-slate-500">
             {mission.organization_name} &middot;{' '}
@@ -458,7 +491,7 @@ export default function MissionDetailPage() {
               <dl className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Type</dt>
-                  <dd className="font-medium">{mission.mission_type.replace(/_/g, ' ')}</dd>
+                  <dd className="font-medium text-right max-w-[60%]">{missionTypeLabel}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Goal</dt>
@@ -472,6 +505,12 @@ export default function MissionDetailPage() {
                   <div className="flex justify-between">
                     <dt className="text-slate-500">Outcome</dt>
                     <dd><OutcomeBadge outcome={mission.outcome} /></dd>
+                  </div>
+                )}
+                {outcomeReason && (
+                  <div className="flex justify-between">
+                    <dt className="text-slate-500">Outcome Reason</dt>
+                    <dd><OutcomeReasonBadge reason={outcomeReason} /></dd>
                   </div>
                 )}
                 {mission.failure_reason && (
@@ -549,6 +588,35 @@ export default function MissionDetailPage() {
                 <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                   {summary}
                 </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {structured && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Letter of Representation Info</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl className="divide-y divide-slate-100 text-sm">
+                  {REQUIRED_CLAIM_OUTPUT_FIELDS.map((field) => {
+                    const value = structured[REQUIRED_OUTPUT_STRUCTURED_KEYS[field]];
+                    const hasValue = value != null && value !== '';
+                    return (
+                      <div key={field} className="flex justify-between gap-4 py-2">
+                        <dt className="text-slate-500">{REQUIRED_CLAIM_OUTPUT_LABELS[field]}</dt>
+                        <dd
+                          className={cn(
+                            'text-right',
+                            hasValue ? 'font-medium text-slate-900' : 'text-red-600',
+                          )}
+                        >
+                          {hasValue ? String(value) : 'Not obtained'}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
               </CardContent>
             </Card>
           )}

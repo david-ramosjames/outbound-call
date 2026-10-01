@@ -6,7 +6,15 @@ import {
   clearProvisionalResults,
   type ProvisionalResult,
 } from './grok-tools.js';
-import type { MissionOutcome } from '@outbound-call/shared';
+import {
+  MISSION_OUTCOME_FOR_REASON,
+  REQUIRED_CLAIM_OUTPUT_FIELDS,
+  REQUIRED_CLAIM_OUTPUT_LABELS,
+  isOutcomeReason,
+  resolveOutcomeReason,
+  validateCapturedField,
+} from '@outbound-call/shared';
+import type { MissionOutcome, OutcomeReason } from '@outbound-call/shared';
 import { config } from '../config.js';
 import { summarizeTranscript } from './transcript-summarizer.js';
 
@@ -14,12 +22,16 @@ const FIELD_LABELS: Record<string, string> = {
   claim_number: 'Claim Number',
   adjuster_name: 'Adjuster Name',
   adjuster_phone: 'Adjuster Phone',
+  adjuster_fax: 'Adjuster Fax',
   adjuster_email: 'Adjuster Email',
+  adjuster_mailing_address: 'Adjuster Mailing Address',
   carrier_fax: 'Carrier Fax',
   carrier_mailing_address: 'Carrier Mailing Address',
   representative_name: 'Representative Name',
   representative_department: 'Representative Department',
 };
+
+const PROPOSABLE_FIELDS = [...REQUIRED_CLAIM_OUTPUT_FIELDS];
 
 function confidenceFromStatus(
   status: ProvisionalResult['confirmationStatus']
@@ -50,9 +62,11 @@ export async function processCallResults(missionId: string): Promise<void> {
       transcriptSummary.extractedFields
     )) {
       if (!value || recordedKeys.has(fieldKey)) continue;
+      const validation = validateCapturedField(fieldKey, value);
+      if (!validation.ok) continue;
       results.push({
         fieldKey,
-        value,
+        value: validation.value,
         confirmationStatus: 'unconfirmed',
         representativeAttribution: 'extracted from transcript',
         supportingQuote: '',
@@ -83,6 +97,7 @@ export async function processCallResults(missionId: string): Promise<void> {
   }> = [];
   let escalationReason: string | null = null;
   let completionStatus = 'not_reported';
+  let reportedOutcomeReason: OutcomeReason | null = null;
 
   for (const ev of events ?? []) {
     const payload = ev.event_payload as Record<string, unknown> | null;
@@ -114,6 +129,9 @@ export async function processCallResults(missionId: string): Promise<void> {
 
     if (tool === 'end_call') {
       completionStatus = payload.completionStatus as string;
+      if (isOutcomeReason(payload.outcomeReason)) {
+        reportedOutcomeReason = payload.outcomeReason;
+      }
     }
   }
 
@@ -124,25 +142,58 @@ export async function processCallResults(missionId: string): Promise<void> {
   }
 
   const get = (key: string) => resultMap.get(key)?.value ?? null;
+  const hasClaim = get('claim_number') !== null;
+
+  const missingRequired = REQUIRED_CLAIM_OUTPUT_FIELDS.filter((f) => !resultMap.has(f));
+  const alreadyNoted = new Set(missingInfo.map((m) => m.field));
+  for (const field of hasClaim ? missingRequired : (['claim_number'] as const)) {
+    if (alreadyNoted.has(field)) continue;
+    missingInfo.push({
+      field,
+      reason: `${REQUIRED_CLAIM_OUTPUT_LABELS[field]} was not obtained on the call.`,
+      effect: 'Needed for the Letter of Representation.',
+      suggestedNextStep: hasClaim
+        ? `Call back on claim ${get('claim_number')} to get the ${REQUIRED_CLAIM_OUTPUT_LABELS[field].toLowerCase()}.`
+        : 'Follow up to open or locate the claim.',
+    });
+  }
+
+  const { count: carrierSegmentCount } = await supabase
+    .from('call_transcript_segments')
+    .select('id', { count: 'exact', head: true })
+    .eq('call_mission_id', missionId)
+    .eq('speaker', 'insurance_representative');
+
+  const outcomeReason = resolveOutcomeReason({
+    reported: reportedOutcomeReason ?? transcriptSummary?.outcomeReason ?? null,
+    escalated: escalationReason !== null,
+    reachedHuman: (carrierSegmentCount ?? 0) > 0 || results.length > 0,
+    hasClaim,
+    missingRequiredCount: missingRequired.length,
+  });
 
   const missionOutcome = determineMissionOutcome(
     completionStatus,
     escalationReason,
-    results
+    outcomeReason
   );
 
   const structuredResults = {
     missionOutcome,
-    claimOpened: get('claim_number') !== null,
+    outcomeReason,
+    claimOpened: hasClaim,
     existingClaimLocated: false,
     claimNumber: get('claim_number'),
     representativeName: get('representative_name'),
     representativeDepartment: get('representative_department'),
     adjusterName: get('adjuster_name'),
     adjusterPhone: get('adjuster_phone'),
+    adjusterFax: get('adjuster_fax'),
     adjusterEmail: get('adjuster_email'),
+    adjusterMailingAddress: get('adjuster_mailing_address'),
     carrierFax: get('carrier_fax'),
     carrierMailingAddress: get('carrier_mailing_address'),
+    missingRequiredOutputs: hasClaim ? missingRequired : ['claim_number'],
     requestedDocuments: requestedDocs,
     missingInformation: missingInfo,
     commitments: transcriptSummary?.commitments ?? [],
@@ -207,14 +258,7 @@ export async function processCallResults(missionId: string): Promise<void> {
     .single();
 
   if (mission) {
-    const proposableFields = [
-      'claim_number',
-      'adjuster_name',
-      'adjuster_phone',
-      'adjuster_email',
-    ];
-
-    for (const fieldKey of proposableFields) {
+    for (const fieldKey of PROPOSABLE_FIELDS) {
       const provisional = resultMap.get(fieldKey);
       if (!provisional) continue;
 
@@ -241,19 +285,32 @@ export async function processCallResults(missionId: string): Promise<void> {
     })
     .eq('id', missionId);
 
+  // Separate write so a database without the outcome_reason column still gets the status update.
+  const { error: reasonError } = await supabase
+    .from('call_missions')
+    .update({ outcome_reason: outcomeReason })
+    .eq('id', missionId);
+  if (reasonError) {
+    logger.error('Failed to save outcome_reason (run migration 20240101000007?)', {
+      ...logCtx,
+      errorMessage: reasonError.message,
+    });
+  }
+
   // Clean up provisional results
   clearProvisionalResults(missionId);
 
   logger.info('Post-call processing completed', {
     ...logCtx,
     status: missionOutcome,
+    outcomeReason,
   });
 }
 
 function determineMissionOutcome(
   completionStatus: string,
   escalationReason: string | null,
-  results: ProvisionalResult[]
+  outcomeReason: OutcomeReason
 ): MissionOutcome {
   if (escalationReason) return 'human_follow_up';
 
@@ -263,14 +320,13 @@ function determineMissionOutcome(
     completionStatus === 'failure' ||
     completionStatus === 'human_follow_up'
   ) {
+    if (completionStatus === 'success' && outcomeReason === 'missing_required_information') {
+      return 'partial_success';
+    }
     return completionStatus as MissionOutcome;
   }
 
-  // Infer from results
-  const hasClaimNumber = results.some((r) => r.fieldKey === 'claim_number');
-  if (hasClaimNumber) return 'success';
-  if (results.length > 0) return 'partial_success';
-  return 'failure';
+  return MISSION_OUTCOME_FOR_REASON[outcomeReason];
 }
 
 function buildSummary(

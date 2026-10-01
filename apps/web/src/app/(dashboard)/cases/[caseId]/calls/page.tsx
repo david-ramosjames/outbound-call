@@ -4,9 +4,14 @@ import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CallStatusBadge, OutcomeBadge } from '@/components/calls/call-status-badge';
+import {
+  CallStatusBadge,
+  OutcomeBadge,
+  OutcomeReasonBadge,
+} from '@/components/calls/call-status-badge';
 import { formatDuration, formatPhoneNumber } from '@/lib/utils';
-import type { CallStatus, MissionOutcome } from '@outbound-call/shared';
+import { MISSION_TYPE_LABELS } from '@outbound-call/shared';
+import type { CallStatus, MissionOutcome, MissionType } from '@outbound-call/shared';
 
 interface CallsListPageProps {
   params: Promise<{ caseId: string }>;
@@ -119,7 +124,8 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
                         {call.title}
                       </Link>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {call.mission_type.replace(/_/g, ' ')}
+                        {MISSION_TYPE_LABELS[call.mission_type as MissionType] ??
+                          call.mission_type.replace(/_/g, ' ')}
                       </p>
                     </td>
                     <td className="px-6 py-3">
@@ -129,7 +135,10 @@ export default async function CallsListPage({ params }: CallsListPageProps) {
                       </p>
                     </td>
                     <td className="px-6 py-3">
-                      <OutcomeBadge outcome={call.outcome as MissionOutcome | null} />
+                      <div className="flex flex-col items-start gap-1">
+                        <OutcomeBadge outcome={call.outcome as MissionOutcome | null} />
+                        <OutcomeReasonBadge reason={call.outcome_reason} />
+                      </div>
                     </td>
                     <td className="px-6 py-3 text-slate-600 tabular-nums">
                       {formatDuration(call.duration_seconds)}

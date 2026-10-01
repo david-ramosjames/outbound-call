@@ -256,4 +256,11 @@ async function handleFailed(
       failure_reason: reason,
     })
     .eq('id', missionId);
+
+  if (status === 'busy' || status === 'no-answer') {
+    await supabase
+      .from('call_missions')
+      .update({ outcome: 'failure', outcome_reason: 'unable_to_reach_representative' })
+      .eq('id', missionId);
+  }
 }

@@ -1,20 +1,86 @@
 export const MISSION_TYPES = [
-  'open_insurance_claim',
+  'open_claim_third_party',
+  'open_claim_first_party',
   'follow_up_existing_claim',
   'request_adjuster_contact',
   'request_claim_documents',
   'pip_follow_up',
+  /** Legacy: missions created before the first/third-party split. Not offered in the wizard. */
+  'open_insurance_claim',
 ] as const;
 
 export type MissionType = (typeof MISSION_TYPES)[number];
 
+export const SELECTABLE_MISSION_TYPES: readonly MissionType[] = MISSION_TYPES.filter(
+  (t) => t !== 'open_insurance_claim',
+);
+
 export const MISSION_TYPE_LABELS: Record<MissionType, string> = {
-  open_insurance_claim: 'Open a new claim',
+  open_claim_third_party: 'Open claim — Third party (other driver’s carrier)',
+  open_claim_first_party: 'Open claim — First party / UM-UIM (client’s own carrier)',
   follow_up_existing_claim: 'Follow up on existing claim',
   request_adjuster_contact: 'Get adjuster / transfer',
   request_claim_documents: 'Request claim documents',
   pip_follow_up: 'PIP / medical benefits follow-up',
+  open_insurance_claim: 'Open a new claim (legacy)',
 };
+
+export type ClaimParty = 'first_party' | 'third_party';
+
+export function claimPartyForMissionType(missionType: MissionType): ClaimParty | null {
+  if (missionType === 'open_claim_first_party') return 'first_party';
+  if (missionType === 'open_claim_third_party') return 'third_party';
+  return null;
+}
+
+/**
+ * Values the agent should try to leave every claim call with. These feed the
+ * Letter of Representation, so getting them on the first call avoids a second call.
+ */
+export const REQUIRED_CLAIM_OUTPUT_FIELDS = [
+  'claim_number',
+  'adjuster_name',
+  'adjuster_phone',
+  'adjuster_fax',
+  'adjuster_email',
+  'adjuster_mailing_address',
+] as const;
+
+export type RequiredClaimOutputField = (typeof REQUIRED_CLAIM_OUTPUT_FIELDS)[number];
+
+export const REQUIRED_CLAIM_OUTPUT_LABELS: Record<RequiredClaimOutputField, string> = {
+  claim_number: 'Claim number',
+  adjuster_name: 'Adjuster full name',
+  adjuster_phone: 'Adjuster phone',
+  adjuster_fax: 'Adjuster fax',
+  adjuster_email: 'Adjuster email',
+  adjuster_mailing_address: 'Adjuster mailing address',
+};
+
+/** Why a call ended the way it did. Tracked per call so carrier / call-type patterns surface over time. */
+export const OUTCOME_REASONS = [
+  'completed',
+  'ai_declined_restricted_request',
+  'carrier_refused_ai',
+  'unable_to_reach_representative',
+  'missing_required_information',
+  'human_follow_up_required',
+] as const;
+
+export type OutcomeReason = (typeof OUTCOME_REASONS)[number];
+
+export const OUTCOME_REASON_LABELS: Record<OutcomeReason, string> = {
+  completed: 'Completed',
+  ai_declined_restricted_request: 'AI refused (restricted request)',
+  carrier_refused_ai: "Carrier won't speak with AI",
+  unable_to_reach_representative: 'Unable to reach representative',
+  missing_required_information: 'Missing required information',
+  human_follow_up_required: 'Human follow-up required',
+};
+
+export function isOutcomeReason(value: unknown): value is OutcomeReason {
+  return typeof value === 'string' && (OUTCOME_REASONS as readonly string[]).includes(value);
+}
 
 export const APPROVED_CONTEXT_FIELDS = [
   // Caller / firm identity
@@ -43,6 +109,8 @@ export const APPROVED_CONTEXT_FIELDS = [
   'policy_type',
   'policyholder_status',
   'insured_name',
+  'client_role_in_loss',
+  'insured_vehicle_description',
   'existing_claim_number',
   'claim_number_spoken',
   'date_of_loss',
@@ -102,7 +170,9 @@ export const CONTEXT_FIELD_LABELS: Record<ApprovedContextField, string> = {
   policy_number: 'Policy Number',
   policy_type: 'Policy Type (auto, homeowners, etc.)',
   policyholder_status: 'Policyholder Status (yes / no / third party)',
-  insured_name: 'Insured Name (if different from client)',
+  insured_name: 'Insured / Policyholder Name',
+  client_role_in_loss: "Client's Role (driver, passenger, pedestrian…)",
+  insured_vehicle_description: "Insured's Vehicle (year / make / model)",
   existing_claim_number: 'Claim Number',
   claim_number_spoken: 'How to Say the Claim Number',
   date_of_loss: 'Date of Loss',
@@ -144,6 +214,9 @@ export const CONTEXT_FIELD_PLACEHOLDERS: Partial<
   policy_number: 'e.g. 4578908453',
   policy_type: 'auto',
   policyholder_status: 'No — calling as attorney for the client (third party)',
+  insured_name: 'Third party: the other driver. First party: our client or their household member',
+  client_role_in_loss: 'e.g. driver of vehicle 2',
+  insured_vehicle_description: 'e.g. 2019 Toyota Camry',
   existing_claim_number: 'e.g. 8896594470000001 or 53-60M2-24J',
   claim_number_spoken:
     'e.g. eight eight nine… then zero zero zero zero zero zero one',
@@ -191,7 +264,7 @@ export const CONTEXT_FIELD_GROUPS: readonly ContextFieldGroup[] = [
     id: 'client',
     title: 'Client verification',
     description:
-      'DOB, phone, ZIP, and name spelling are repeatedly requested by carrier IVRs.',
+      'Minimum necessary only. DOB, phone, and address stay off unless you turn them on — otherwise the bot says "We don\'t have that information at this time."',
     fields: [
       'client_full_name',
       'client_name_phonetic',
@@ -208,13 +281,15 @@ export const CONTEXT_FIELD_GROUPS: readonly ContextFieldGroup[] = [
     id: 'claim',
     title: 'Policy & claim',
     description:
-      'Policy number, claim number, date of loss, and policyholder status are core routing inputs.',
+      'Who the insured is, the client’s role, policy number, and date of loss decide how the carrier opens the claim.',
     fields: [
       'insurance_carrier',
+      'insured_name',
+      'client_role_in_loss',
+      'insured_vehicle_description',
       'policy_number',
       'policy_type',
       'policyholder_status',
-      'insured_name',
       'existing_claim_number',
       'claim_number_spoken',
       'date_of_loss',
@@ -280,8 +355,22 @@ export const CONTEXT_FIELD_GROUPS: readonly ContextFieldGroup[] = [
 export const PRIMARY_CONTEXT_FIELDS: readonly ApprovedContextField[] =
   CONTEXT_FIELD_GROUPS.filter((g) => g.primary).flatMap((g) => [...g.fields]);
 
+/**
+ * Personal identifiers that are never pre-selected, even when the case has a value.
+ * A user must turn them on deliberately for a specific call.
+ */
+export const WITHHELD_BY_DEFAULT_FIELDS: readonly ApprovedContextField[] = [
+  'client_date_of_birth',
+  'client_phone_number',
+  'client_address',
+];
+
+/** What the agent says when asked for personal information it does not have approved. */
+export const NOT_AVAILABLE_RESPONSE = "We don't have that information at this time.";
+
 export const RESTRICTED_FIELDS = [
   'social_security_number',
+  'drivers_license_number',
   'banking_information',
   'payment_card_information',
   'injuries',
@@ -306,7 +395,7 @@ export type RestrictedField = (typeof RESTRICTED_FIELDS)[number];
  * (or a hand-edited request) marks them as included.
  */
 const NEVER_DISCLOSED_FIELD_PATTERN =
-  /injur|symptom|medical|treatment|diagnos|prognos|bodily|health|fault|liabil/i;
+  /injur|symptom|medical|treatment|diagnos|prognos|bodily|health|fault|liabil|(^|_)ssn(_|$)|social_security|driver_?s?_licen/i;
 
 export function isNeverDisclosedField(field: string): boolean {
   return (

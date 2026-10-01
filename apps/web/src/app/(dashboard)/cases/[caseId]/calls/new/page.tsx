@@ -18,6 +18,10 @@ import {
   MISSION_TEMPLATES_BY_TYPE,
   DEFAULT_INCLUDED_FIELDS_BY_MISSION,
   MISSION_TYPE_LABELS,
+  REQUIRED_CLAIM_OUTPUT_FIELDS,
+  REQUIRED_CLAIM_OUTPUT_LABELS,
+  WITHHELD_BY_DEFAULT_FIELDS,
+  claimPartyForMissionType,
 } from '@outbound-call/shared';
 import type {
   Destination,
@@ -40,11 +44,7 @@ function buildInstructions(missionType: MissionType): MissionInstructions {
     objectives: [...template.defaultObjectives],
     successCriteria: [...template.defaultSuccessCriteria],
     requiredInformation: [
-      'Claim number',
-      'Adjuster name',
-      'Adjuster phone / extension',
-      'Adjuster email',
-      'Fax number or mailing address',
+      ...REQUIRED_CLAIM_OUTPUT_FIELDS.map((f) => REQUIRED_CLAIM_OUTPUT_LABELS[f]),
       'Documents promised / sent',
       'Next steps and follow-up timing',
     ],
@@ -55,15 +55,36 @@ function buildInstructions(missionType: MissionType): MissionInstructions {
   };
 }
 
+const POLICYHOLDER_STATUS_BY_PARTY = {
+  third_party:
+    'No — attorney calling on behalf of a claimant against your insured (third party)',
+  first_party: 'Attorney calling on behalf of your insured (first party / UM-UIM)',
+} as const;
+
+const withheld = new Set<string>(WITHHELD_BY_DEFAULT_FIELDS);
+
 function applyMissionDefaults(
   fields: ApprovedContextEntry[],
   missionType: MissionType,
 ): ApprovedContextEntry[] {
   const included = new Set(DEFAULT_INCLUDED_FIELDS_BY_MISSION[missionType]);
-  return fields.map((f) => ({
-    ...f,
-    included: included.has(f.field) || Boolean(f.value?.trim()),
-  }));
+  const party = claimPartyForMissionType(missionType);
+  return fields.map((f) => {
+    const next =
+      f.field === 'policyholder_status' && party
+        ? {
+            ...f,
+            value: POLICYHOLDER_STATUS_BY_PARTY[party],
+            missionSpecificValue: POLICYHOLDER_STATUS_BY_PARTY[party],
+          }
+        : f;
+    return {
+      ...next,
+      included:
+        !withheld.has(f.field) &&
+        (included.has(f.field) || Boolean(next.value?.trim())),
+    };
+  });
 }
 
 export default function NewCallPage() {
@@ -74,7 +95,7 @@ export default function NewCallPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [isLaunching, setIsLaunching] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [missionType, setMissionType] = useState<MissionType>('open_insurance_claim');
+  const [missionType, setMissionType] = useState<MissionType>('open_claim_third_party');
 
   const [destination, setDestination] = useState<Partial<Destination>>({
     organizationName: '',
@@ -94,12 +115,12 @@ export default function NewCallPage() {
           value: '',
           included: false,
         })),
-        'open_insurance_claim',
+        'open_claim_third_party',
       ),
   );
 
   const [instructions, setInstructions] = useState<MissionInstructions>(() =>
-    buildInstructions('open_insurance_claim'),
+    buildInstructions('open_claim_third_party'),
   );
 
   const loadCaseData = useCallback(async () => {
@@ -137,7 +158,6 @@ export default function NewCallPage() {
       policy_type: 'auto',
       incident_type: 'accident',
       accident_state: 'Texas',
-      policyholder_status: 'No — attorney calling on behalf of the client (third party)',
     };
 
     setContextFields((prev) =>

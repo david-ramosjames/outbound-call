@@ -4,7 +4,12 @@ import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
 import {
   BODILY_INJURY_LIABILITY_REFUSAL,
+  NOT_AVAILABLE_RESPONSE,
+  OUTCOME_REASONS,
+  REQUIRED_CLAIM_OUTPUT_FIELDS,
+  REQUIRED_CLAIM_OUTPUT_LABELS,
   isNeverDisclosedField,
+  validateCapturedField,
 } from '@outbound-call/shared';
 import type { CallMission } from '@outbound-call/shared';
 
@@ -50,6 +55,7 @@ export const endCallArgsSchema = z.object({
     'failure',
     'human_follow_up',
   ]),
+  outcomeReason: z.enum(OUTCOME_REASONS).optional(),
   closingReason: z.string(),
 });
 
@@ -149,7 +155,7 @@ export async function handleGetApprovedCaseField(
     });
     return JSON.stringify({
       error: 'field_not_available',
-      message: `The field "${args.fieldKey}" is not in the approved context for this mission. Do not attempt to answer from memory.`,
+      message: `The field "${args.fieldKey}" is not approved for this call. If the representative asked for it, say exactly: "${NOT_AVAILABLE_RESPONSE}" Do not answer from memory.`,
     });
   }
 
@@ -172,12 +178,32 @@ export async function handleRecordCollectedField(
 ): Promise<string> {
   const args = recordCollectedFieldArgsSchema.parse(rawArgs);
 
+  const validation = validateCapturedField(args.fieldKey, args.value);
+  if (!validation.ok) {
+    await saveCallEvent(ctx.missionId, ctx.callSessionId, 'tool_result_returned', {
+      tool: 'record_collected_field',
+      fieldKey: args.fieldKey,
+      result: 'invalid',
+      problem: validation.problem,
+    });
+    return JSON.stringify({
+      status: 'invalid',
+      fieldKey: args.fieldKey,
+      problem: validation.problem,
+      message:
+        'Not recorded. Politely ask the representative to repeat just this one item, then record it again.',
+    });
+  }
+
   const entry: ProvisionalResult = {
     ...args,
+    value: validation.value,
     recordedAt: new Date().toISOString(),
   };
 
-  const existing = provisionalResults.get(ctx.missionId) ?? [];
+  const existing = (provisionalResults.get(ctx.missionId) ?? []).filter(
+    (r) => r.fieldKey !== args.fieldKey,
+  );
   existing.push(entry);
   provisionalResults.set(ctx.missionId, existing);
 
@@ -196,7 +222,42 @@ export async function handleRecordCollectedField(
   return JSON.stringify({
     status: 'recorded',
     fieldKey: args.fieldKey,
-    message: 'Value recorded provisionally. It will be reviewed after the call.',
+    value: validation.value,
+    message:
+      args.confirmationStatus === 'confirmed'
+        ? 'Confirmed value recorded.'
+        : 'Recorded. Do not read it back now — include it in the single final confirmation.',
+  });
+}
+
+export function missingRequiredOutputs(missionId: string): string[] {
+  const recorded = new Set(getProvisionalResults(missionId).map((r) => r.fieldKey));
+  return REQUIRED_CLAIM_OUTPUT_FIELDS.filter((f) => !recorded.has(f));
+}
+
+export async function handleCheckRequiredOutputs(
+  _rawArgs: unknown,
+  ctx: ToolCallContext
+): Promise<string> {
+  const missing = missingRequiredOutputs(ctx.missionId);
+  const unconfirmed = getProvisionalResults(ctx.missionId)
+    .filter(
+      (r) =>
+        (REQUIRED_CLAIM_OUTPUT_FIELDS as readonly string[]).includes(r.fieldKey) &&
+        r.confirmationStatus !== 'confirmed',
+    )
+    .map((r) => r.fieldKey);
+
+  return JSON.stringify({
+    missing: missing.map((f) => ({
+      fieldKey: f,
+      label: REQUIRED_CLAIM_OUTPUT_LABELS[f as keyof typeof REQUIRED_CLAIM_OUTPUT_LABELS],
+    })),
+    awaitingFinalConfirmation: unconfirmed,
+    message:
+      missing.length > 0
+        ? 'Ask for the missing items (once each). If unavailable, record them with record_missing_information.'
+        : 'All required outputs recorded. Do the single final confirmation read-back.',
   });
 }
 
@@ -286,6 +347,7 @@ export async function handleEndCall(
   await saveCallEvent(ctx.missionId, ctx.callSessionId, 'call_completed', {
     tool: 'end_call',
     completionStatus: args.completionStatus,
+    outcomeReason: args.outcomeReason ?? null,
     closingReason: args.closingReason,
   });
 
@@ -317,6 +379,8 @@ export async function dispatchToolCall(
       return handleGetApprovedCaseField(rawArgs, ctx);
     case 'record_collected_field':
       return handleRecordCollectedField(rawArgs, ctx);
+    case 'check_required_outputs':
+      return handleCheckRequiredOutputs(rawArgs, ctx);
     case 'record_missing_information':
       return handleRecordMissingInformation(rawArgs, ctx);
     case 'record_requested_document':
@@ -372,14 +436,18 @@ export function getToolDefinitions(): Array<{
           fieldKey: {
             type: 'string',
             description:
-              'A descriptive key for the field (e.g. "claim_number", "adjuster_name", "adjuster_phone").',
+              'Use these keys for required outputs: "claim_number", "adjuster_name", "adjuster_phone", "adjuster_fax", "adjuster_email", "adjuster_mailing_address". Other keys: "representative_name", "representative_department".',
           },
-          value: { type: 'string', description: 'The value collected.' },
+          value: {
+            type: 'string',
+            description:
+              'The value collected. Phone/fax: all 10 digits plus any extension. Email: name@domain.com form.',
+          },
           confirmationStatus: {
             type: 'string',
             enum: ['confirmed', 'tentative', 'unconfirmed'],
             description:
-              'How confident you are in this value. "confirmed" = representative explicitly stated and you repeated back. "tentative" = representative stated but not confirmed. "unconfirmed" = inferred or unclear.',
+              '"tentative" when first heard. "confirmed" only after the representative confirms it in the single final read-back. "unconfirmed" = inferred or unclear.',
           },
           representativeAttribution: {
             type: 'string',
@@ -400,6 +468,13 @@ export function getToolDefinitions(): Array<{
           'supportingQuote',
         ],
       },
+    },
+    {
+      type: 'function',
+      name: 'check_required_outputs',
+      description:
+        'Check which Letter of Representation outputs (claim number, adjuster name/phone/fax/email/mailing address) are still missing or not yet confirmed. Call before the final read-back and before ending the call.',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
     {
       type: 'function',
@@ -501,12 +576,18 @@ export function getToolDefinitions(): Array<{
             enum: ['success', 'partial_success', 'failure', 'human_follow_up'],
             description: 'The overall outcome of the call.',
           },
+          outcomeReason: {
+            type: 'string',
+            enum: [...OUTCOME_REASONS],
+            description:
+              'Why the call ended this way: completed, ai_declined_restricted_request, carrier_refused_ai, unable_to_reach_representative, missing_required_information, human_follow_up_required.',
+          },
           closingReason: {
             type: 'string',
             description: 'A brief explanation of why the call is ending with this status.',
           },
         },
-        required: ['completionStatus', 'closingReason'],
+        required: ['completionStatus', 'outcomeReason', 'closingReason'],
       },
     },
   ];

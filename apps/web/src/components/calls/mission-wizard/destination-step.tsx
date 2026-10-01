@@ -2,7 +2,7 @@
 
 import { Input } from '@/components/ui/input';
 import {
-  MISSION_TYPES,
+  SELECTABLE_MISSION_TYPES,
   MISSION_TYPE_LABELS,
   MISSION_TEMPLATES_BY_TYPE,
 } from '@outbound-call/shared';
@@ -47,7 +47,7 @@ export function DestinationStep({
           Call purpose *
         </label>
         <div className="grid gap-2">
-          {MISSION_TYPES.map((type) => {
+          {SELECTABLE_MISSION_TYPES.map((type) => {
             const template = MISSION_TEMPLATES_BY_TYPE[type];
             const selected = missionType === type;
             return (

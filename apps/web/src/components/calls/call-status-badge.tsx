@@ -12,7 +12,8 @@ import {
   Pause,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import type { CallStatus, MissionOutcome } from '@outbound-call/shared';
+import { OUTCOME_REASON_LABELS, isOutcomeReason } from '@outbound-call/shared';
+import type { CallStatus, MissionOutcome, OutcomeReason } from '@outbound-call/shared';
 
 const statusConfig: Record<
   CallStatus,
@@ -65,6 +66,33 @@ export function CallStatusBadge({ status, className }: CallStatusBadgeProps) {
 interface OutcomeBadgeProps {
   outcome: MissionOutcome | null;
   className?: string;
+}
+
+const outcomeReasonVariant: Record<
+  OutcomeReason,
+  'default' | 'success' | 'warning' | 'destructive' | 'info' | 'secondary'
+> = {
+  completed: 'success',
+  missing_required_information: 'warning',
+  human_follow_up_required: 'warning',
+  ai_declined_restricted_request: 'warning',
+  carrier_refused_ai: 'destructive',
+  unable_to_reach_representative: 'destructive',
+};
+
+export function OutcomeReasonBadge({
+  reason,
+  className,
+}: {
+  reason: string | null | undefined;
+  className?: string;
+}) {
+  if (!isOutcomeReason(reason)) return null;
+  return (
+    <Badge variant={outcomeReasonVariant[reason]} className={className}>
+      {OUTCOME_REASON_LABELS[reason]}
+    </Badge>
+  );
 }
 
 export function OutcomeBadge({ outcome, className }: OutcomeBadgeProps) {

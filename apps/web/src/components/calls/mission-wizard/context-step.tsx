@@ -7,8 +7,12 @@ import {
   RESTRICTED_FIELDS,
   CONTEXT_FIELD_GROUPS,
   CONTEXT_FIELD_PLACEHOLDERS,
+  NOT_AVAILABLE_RESPONSE,
+  WITHHELD_BY_DEFAULT_FIELDS,
 } from '@outbound-call/shared';
 import type { ApprovedContextEntry } from '@outbound-call/shared';
+
+const withheld = new Set<string>(WITHHELD_BY_DEFAULT_FIELDS);
 
 interface ContextStepProps {
   contextFields: ApprovedContextEntry[];
@@ -30,8 +34,9 @@ export function ContextStep({
       <div>
         <h2 className="text-lg font-semibold text-slate-900">Approved Context</h2>
         <p className="text-sm text-slate-500 mt-1">
-          Enter everything the bot is allowed to use on this call. Toggle a field
-          on to authorize disclosure. Empty fields stay off unless you type a value.
+          Turn on only the minimum the carrier needs to open or locate the claim.
+          Toggle a field on to authorize disclosure. Anything left off gets the
+          answer &ldquo;{NOT_AVAILABLE_RESPONSE}&rdquo;
         </p>
       </div>
 
@@ -45,8 +50,9 @@ export function ContextStep({
             <p className="text-xs text-amber-700 mt-1">
               The following are <strong>never</strong> disclosed:{' '}
               {RESTRICTED_FIELDS.map((f) => f.replace(/_/g, ' ')).join(', ')}.
-              If an IVR asks for SSN, the bot should say it does not have it and
-              continue with DOB, phone, ZIP, policy, or claim number instead. The
+              If asked for SSN or a driver&apos;s license number, the bot says
+              &ldquo;{NOT_AVAILABLE_RESPONSE}&rdquo; Date of birth, client phone, and
+              client address are off by default even when the case has them. The
               bot will never discuss the client&apos;s injuries, medical status, fault,
               or liability, so don&apos;t enter them in any field.
             </p>
@@ -108,6 +114,12 @@ export function ContextStep({
                           <Shield className="h-3.5 w-3.5 text-navy-600" />
                         )}
                       </div>
+                      {withheld.has(field.field) && (
+                        <p className="text-[11px] text-amber-700">
+                          Off by default. Turn on only if the carrier can&apos;t open the
+                          claim without it.
+                        </p>
+                      )}
                       {field.value &&
                         field.missionSpecificValue !== undefined &&
                         field.missionSpecificValue !== field.value && (

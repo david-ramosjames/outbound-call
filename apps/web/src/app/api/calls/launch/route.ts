@@ -24,8 +24,8 @@ export async function POST(request: NextRequest) {
     const { error: upsertError } = await supabase
       .from('case_tracker_user_roles')
       .upsert(
-        { user_id: user.id, role: 'staff', active: true },
-        { onConflict: 'user_id' },
+        { user_id: user.id, role: 'legal_assistant', active: true },
+        { onConflict: 'user_id', ignoreDuplicates: true },
       );
     if (upsertError) {
       console.error('[launch] role upsert failed', upsertError);

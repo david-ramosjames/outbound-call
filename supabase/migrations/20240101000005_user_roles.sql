@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS public.case_tracker_user_roles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  role text NOT NULL DEFAULT 'staff',
+  role text NOT NULL DEFAULT 'legal_assistant',
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -37,10 +37,8 @@ BEGIN
   END IF;
 
   INSERT INTO public.case_tracker_user_roles (user_id, role, active)
-  VALUES (auth.uid(), 'staff', true)
-  ON CONFLICT (user_id) DO UPDATE
-    SET active = true,
-        updated_at = now();
+  VALUES (auth.uid(), 'legal_assistant', true)
+  ON CONFLICT (user_id) DO NOTHING;
 END;
 $$;
 

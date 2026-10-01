@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { Phone, TrendingUp, Clock, CheckCircle2 } from 'lucide-react';
+import { Phone, TrendingUp, Clock, CheckCircle2, Search } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   CallStatusBadge,
@@ -51,14 +52,74 @@ function buildCarrierOutcomes(
   return [...rows.values()].sort((a, b) => b.total - a.total);
 }
 
-export default async function GlobalCallsPage() {
+interface CaseInfo {
+  case_number: string | null;
+  name: string | null;
+  client_name: string | null;
+  client_first_name: string | null;
+  client_last_name: string | null;
+}
+
+function clientNameFor(c: CaseInfo | null): string | null {
+  if (!c) return null;
+  return (
+    c.client_name?.trim() ||
+    [c.client_first_name, c.client_last_name].filter(Boolean).join(' ').trim() ||
+    c.name?.trim() ||
+    null
+  );
+}
+
+const CASE_COLUMNS = 'case_number, name, client_name, client_first_name, client_last_name';
+
+export default async function GlobalCallsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
+  // Characters that would break a PostgREST or() filter string
+  const search = (q ?? '').replace(/[,()%*\\]/g, ' ').trim();
   const supabase = await createClient();
 
   const { data: calls } = await supabase
     .from('call_missions')
-    .select('*')
+    .select(`*, cases(${CASE_COLUMNS})`)
     .order('created_at', { ascending: false })
     .limit(50);
+
+  let tableCalls = calls ?? [];
+  if (search) {
+    const terms = search.split(/\s+/).filter(Boolean);
+    const filters = [
+      `case_number.ilike.*${search}*`,
+      `name.ilike.*${search}*`,
+      `client_name.ilike.*${search}*`,
+      ...terms.flatMap((t) => [
+        `client_first_name.ilike.*${t}*`,
+        `client_last_name.ilike.*${t}*`,
+      ]),
+    ].join(',');
+
+    const { data: matchingCases } = await supabase
+      .from('cases')
+      .select('id')
+      .or(filters)
+      .limit(500);
+
+    const caseIds = (matchingCases ?? []).map((c) => c.id as string);
+    if (caseIds.length === 0) {
+      tableCalls = [];
+    } else {
+      const { data: searched } = await supabase
+        .from('call_missions')
+        .select(`*, cases(${CASE_COLUMNS})`)
+        .in('case_id', caseIds)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      tableCalls = searched ?? [];
+    }
+  }
 
   const { data: outcomeCalls } = await supabase
     .from('call_missions')
@@ -178,13 +239,39 @@ export default async function GlobalCallsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent Calls</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>{search ? 'Search Results' : 'Recent Calls'}</CardTitle>
+            <form method="get" className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  name="q"
+                  defaultValue={q ?? ''}
+                  placeholder="Search client name or case number"
+                  className="h-9 w-72 rounded-md border border-slate-300 bg-white pl-8 pr-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-firm-accent"
+                />
+              </div>
+              <Button type="submit" size="sm">
+                Search
+              </Button>
+              {search && (
+                <Link href="/calls" className="text-sm text-slate-500 hover:text-slate-700">
+                  Clear
+                </Link>
+              )}
+            </form>
+          </div>
         </CardHeader>
-        {allCalls.length === 0 ? (
+        {tableCalls.length === 0 ? (
           <CardContent>
             <div className="text-center py-8">
               <CheckCircle2 className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500">No calls yet. Create one from a case.</p>
+              <p className="text-slate-500">
+                {search
+                  ? `No calls found for "${search}".`
+                  : 'No calls yet. Create one from a case.'}
+              </p>
             </div>
           </CardContent>
         ) : (
@@ -193,6 +280,7 @@ export default async function GlobalCallsPage() {
               <thead>
                 <tr className="border-b border-slate-100">
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Status</th>
+                  <th className="text-left px-6 py-3 font-medium text-slate-500">Client / Case</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Mission</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Destination</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Outcome</th>
@@ -201,10 +289,24 @@ export default async function GlobalCallsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {allCalls.map((call) => (
+                {tableCalls.map((call) => {
+                  const caseInfo = (call.cases ?? null) as CaseInfo | null;
+                  const clientName = clientNameFor(caseInfo);
+                  return (
                   <tr key={call.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-3">
                       <CallStatusBadge status={call.status as CallStatus} />
+                    </td>
+                    <td className="px-6 py-3">
+                      <Link
+                        href={`/cases/${call.case_id}`}
+                        className="font-medium text-slate-900 hover:underline"
+                      >
+                        {clientName ?? 'Unknown client'}
+                      </Link>
+                      <p className="text-xs text-slate-500">
+                        {caseInfo?.case_number?.trim() || '—'}
+                      </p>
                     </td>
                     <td className="px-6 py-3">
                       <Link
@@ -233,7 +335,8 @@ export default async function GlobalCallsPage() {
                       {format(new Date(call.created_at), 'MMM d, yyyy')}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

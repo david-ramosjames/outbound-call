@@ -1,0 +1,39 @@
+import { NextResponse } from 'next/server';
+import type { AuditActor, AuditEventType } from '@outbound-call/shared';
+import { createClient } from '@/lib/supabase/server';
+
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/** Resolve the signed-in staff member for an inbound admin API route. */
+export async function requireStaff(): Promise<
+  { ok: true; supabase: ServerClient; userId: string; email: string } | { ok: false; response: NextResponse }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  return { ok: true, supabase, userId: user.id, email: user.email ?? '' };
+}
+
+export async function writeInboundAudit(
+  supabase: ServerClient,
+  input: {
+    type: AuditEventType;
+    actor: AuditActor;
+    userId: string;
+    data?: Record<string, unknown>;
+    callId?: string | null;
+    intakeId?: string | null;
+  },
+): Promise<void> {
+  const { error } = await supabase.from('inbound_audit_events').insert({
+    event_type: input.type,
+    actor: input.actor,
+    actor_user_id: input.userId,
+    event_data: input.data ?? {},
+    call_id: input.callId ?? null,
+    intake_id: input.intakeId ?? null,
+  });
+  if (error) console.error('[inbound] audit insert failed', error.message);
+}

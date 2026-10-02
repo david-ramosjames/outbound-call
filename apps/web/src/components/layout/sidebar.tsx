@@ -8,6 +8,15 @@ import {
   Settings,
   Scale,
   LogOut,
+  LayoutDashboard,
+  PhoneIncoming,
+  ClipboardList,
+  FlaskConical,
+  ListChecks,
+  MessageSquareText,
+  Clock,
+  FileSignature,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -16,6 +25,18 @@ const navItems = [
   { label: 'Cases', href: '/cases', icon: Briefcase },
   { label: 'AI Calls', href: '/calls', icon: Phone },
   { label: 'Settings', href: '/settings/voice', icon: Settings },
+];
+
+const inboundNavItems = [
+  { label: 'Dashboard', href: '/inbound', icon: LayoutDashboard, exact: true },
+  { label: 'Calls', href: '/inbound/calls', icon: PhoneIncoming },
+  { label: 'Intakes', href: '/inbound/intakes', icon: ClipboardList },
+  { label: 'Test Agent', href: '/inbound/test', icon: FlaskConical },
+  { label: 'Qualification Rules', href: '/inbound/rules', icon: ListChecks },
+  { label: 'Agent Instructions', href: '/inbound/instructions', icon: MessageSquareText },
+  { label: 'Routing & Hours', href: '/inbound/routing', icon: Clock },
+  { label: 'Contracts', href: '/inbound/contracts', icon: FileSignature },
+  { label: 'Settings', href: '/inbound/settings', icon: SlidersHorizontal },
 ];
 
 interface DashboardSidebarProps {
@@ -51,7 +72,10 @@ export function DashboardSidebar({ userEmail }: DashboardSidebarProps) {
         </Link>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          Outbound
+        </p>
         {navItems.map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + '/');
@@ -66,6 +90,22 @@ export function DashboardSidebar({ userEmail }: DashboardSidebarProps) {
                 isActive && 'active',
               )}
             >
+              <Icon className="h-4.5 w-4.5" />
+              {item.label}
+            </Link>
+          );
+        })}
+
+        <p className="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          Inbound Intake
+        </p>
+        {inboundNavItems.map((item) => {
+          const isActive = item.exact
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(item.href + '/');
+          const Icon = item.icon;
+          return (
+            <Link key={item.href} href={item.href} className={cn('sidebar-nav-item', isActive && 'active')}>
               <Icon className="h-4.5 w-4.5" />
               {item.label}
             </Link>

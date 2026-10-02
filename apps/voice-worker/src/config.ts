@@ -13,6 +13,8 @@ const envSchema = z.object({
   XAI_SIP_WEBHOOK_SECRET: isMock ? z.string().default('mock-webhook-secret') : z.string().min(1),
   XAI_REALTIME_URL: z.string().url().default('wss://api.x.ai/v1/realtime'),
   XAI_SUMMARY_MODEL: z.string().default('grok-4'),
+  XAI_INBOUND_SIM_MODEL: z.string().default('grok-4'),
+  INBOUND_CONTRACT_WEBHOOK_SECRET: z.string().default(''),
 
   TWILIO_ACCOUNT_SID: isMock ? z.string().default('mock-twilio-sid') : z.string().min(1),
   TWILIO_AUTH_TOKEN: isMock ? z.string().default('mock-twilio-token') : z.string().min(1),

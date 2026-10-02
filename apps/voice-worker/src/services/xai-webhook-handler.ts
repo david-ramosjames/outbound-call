@@ -217,6 +217,14 @@ export async function handleXaiWebhook(
     return;
   }
 
+  // Inbound intake calls carry their own header; must run before the outbound recent-mission fallback.
+  try {
+    const { tryHandleInboundXaiCall } = await import('../inbound/xai-branch.js');
+    if (tryHandleInboundXaiCall(payload, xaiCallId)) return;
+  } catch (err) {
+    logger.error('Inbound xAI routing check failed', { xaiCallId, error: err });
+  }
+
   const missionId = await correlateXaiCall(payload);
 
   if (!missionId) {

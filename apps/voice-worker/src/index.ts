@@ -67,6 +67,15 @@ try {
   console.error('[voice-worker] Failed to load routes:', err);
 }
 
+// Inbound intake routes load separately so a failure there can never take down outbound.
+try {
+  const { inboundRouter } = await import('./inbound/routes.js');
+  app.use(inboundRouter);
+  console.log('[voice-worker] Inbound intake routes registered');
+} catch (err) {
+  console.error('[voice-worker] Failed to load inbound intake routes:', err);
+}
+
 // Global error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   logger.error('Unhandled error', {

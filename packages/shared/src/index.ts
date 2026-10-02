@@ -13,3 +13,4 @@ export * from './utils/phone-validation.js';
 export * from './utils/calling-hours.js';
 export * from './utils/capture-validation.js';
 export * from './utils/outcome-reason.js';
+export * from './inbound/index.js';

@@ -33,11 +33,19 @@ export async function PUT(request: NextRequest) {
   }
 
   const { data: before } = await supabase.from('inbound_settings').select(section).eq('id', 1).maybeSingle();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('inbound_settings')
-    .upsert({ id: 1, [section]: parsed.data, updated_by: userId, updated_at: new Date().toISOString() });
+    .update({ [section]: parsed.data, updated_by: userId, updated_at: new Date().toISOString() })
+    .eq('id', 1)
+    .select('id');
   if (error) {
     return NextResponse.json({ error: `Failed to save: ${error.message}` }, { status: 500 });
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json(
+      { error: 'Failed to save: settings row not found or your account lacks an active role. Re-run the inbound migration and check case_tracker_user_roles.' },
+      { status: 403 },
+    );
   }
 
   await writeInboundAudit(supabase, {

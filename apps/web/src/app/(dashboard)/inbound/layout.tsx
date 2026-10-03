@@ -4,8 +4,8 @@ import { isInboundAdmin } from '@/lib/inbound-admin';
 
 export const dynamic = 'force-dynamic';
 
-export default async function InboundAdminLayout({ children }: { children: React.ReactNode }) {
+export default async function InboundLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
-  if (!(await isInboundAdmin(supabase))) redirect('/inbound');
+  if (!(await isInboundAdmin(supabase))) redirect('/cases');
   return <>{children}</>;
 }

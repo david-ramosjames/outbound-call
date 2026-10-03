@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireStaff } from '@/lib/inbound-admin';
+import { requireAdmin } from '@/lib/inbound-admin';
 
 export const maxDuration = 120;
 
 /** Proxy a Test Agent turn to the voice worker (which holds the xAI key). Nothing is written to intake tables. */
 export async function POST(request: NextRequest) {
-  const auth = await requireStaff();
+  const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
   const workerUrl = process.env.VOICE_WORKER_BASE_URL;

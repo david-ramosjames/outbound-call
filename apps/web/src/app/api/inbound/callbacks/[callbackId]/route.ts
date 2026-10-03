@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireStaff, writeInboundAudit } from '@/lib/inbound-admin';
+import { requireAdmin, writeInboundAudit } from '@/lib/inbound-admin';
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ callbackId: string }> }) {
   const { callbackId } = await params;
-  const auth = await requireStaff();
+  const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const { supabase, userId, email } = auth;
 

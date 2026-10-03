@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { INBOUND_INTAKE_STATUSES } from '@outbound-call/shared';
-import { requireStaff, writeInboundAudit } from '@/lib/inbound-admin';
+import { requireAdmin, writeInboundAudit } from '@/lib/inbound-admin';
 
 /** Staff review of an intake: change status, add notes, mark reviewed. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ intakeId: string }> }) {
   const { intakeId } = await params;
-  const auth = await requireStaff();
+  const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const { supabase, userId, email } = auth;
 

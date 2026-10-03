@@ -16,6 +16,25 @@ export async function requireStaff(): Promise<
   return { ok: true, supabase, userId: user.id, email: user.email ?? '' };
 }
 
+export async function isInboundAdmin(supabase: ServerClient): Promise<boolean> {
+  const { data, error } = await supabase.rpc('case_tracker_is_admin');
+  if (error) {
+    console.error('[inbound] admin check failed', error.message);
+    return false;
+  }
+  return data === true;
+}
+
+/** Inbound configuration (settings, rules, instructions) is admin-only. */
+export async function requireAdmin(): ReturnType<typeof requireStaff> {
+  const auth = await requireStaff();
+  if (!auth.ok) return auth;
+  if (!(await isInboundAdmin(auth.supabase))) {
+    return { ok: false, response: NextResponse.json({ error: 'Only admins can change inbound settings' }, { status: 403 }) };
+  }
+  return auth;
+}
+
 export async function writeInboundAudit(
   supabase: ServerClient,
   input: {

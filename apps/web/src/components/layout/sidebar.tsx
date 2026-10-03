@@ -32,18 +32,19 @@ const inboundNavItems = [
   { label: 'Calls', href: '/inbound/calls', icon: PhoneIncoming },
   { label: 'Intakes', href: '/inbound/intakes', icon: ClipboardList },
   { label: 'Test Agent', href: '/inbound/test', icon: FlaskConical },
-  { label: 'Qualification Rules', href: '/inbound/rules', icon: ListChecks },
-  { label: 'Agent Instructions', href: '/inbound/instructions', icon: MessageSquareText },
-  { label: 'Routing & Hours', href: '/inbound/routing', icon: Clock },
-  { label: 'Contracts', href: '/inbound/contracts', icon: FileSignature },
-  { label: 'Settings', href: '/inbound/settings', icon: SlidersHorizontal },
+  { label: 'Qualification Rules', href: '/inbound/rules', icon: ListChecks, adminOnly: true },
+  { label: 'Agent Instructions', href: '/inbound/instructions', icon: MessageSquareText, adminOnly: true },
+  { label: 'Routing & Hours', href: '/inbound/routing', icon: Clock, adminOnly: true },
+  { label: 'Contracts', href: '/inbound/contracts', icon: FileSignature, adminOnly: true },
+  { label: 'Settings', href: '/inbound/settings', icon: SlidersHorizontal, adminOnly: true },
 ];
 
 interface DashboardSidebarProps {
   userEmail: string;
+  isAdmin: boolean;
 }
 
-export function DashboardSidebar({ userEmail }: DashboardSidebarProps) {
+export function DashboardSidebar({ userEmail, isAdmin }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -99,7 +100,7 @@ export function DashboardSidebar({ userEmail }: DashboardSidebarProps) {
         <p className="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           Inbound Intake
         </p>
-        {inboundNavItems.map((item) => {
+        {inboundNavItems.filter((item) => isAdmin || !('adminOnly' in item)).map((item) => {
           const isActive = item.exact
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(item.href + '/');

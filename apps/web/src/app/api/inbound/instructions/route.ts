@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { agentInstructionsSchema } from '@outbound-call/shared';
-import { requireStaff, writeInboundAudit } from '@/lib/inbound-admin';
+import { requireAdmin, writeInboundAudit } from '@/lib/inbound-admin';
 
 /** Save agent instructions as a new active version. Older versions are kept for rollback. */
 export async function POST(request: NextRequest) {
-  const auth = await requireStaff();
+  const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const { supabase, userId, email } = auth;
 

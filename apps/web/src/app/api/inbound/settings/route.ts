@@ -6,7 +6,7 @@ import {
   qualificationConfigSchema,
   routingSchema,
 } from '@outbound-call/shared';
-import { requireStaff, writeInboundAudit } from '@/lib/inbound-admin';
+import { requireAdmin, writeInboundAudit } from '@/lib/inbound-admin';
 
 const SECTION_SCHEMAS = {
   flags: inboundFlagsSchema,
@@ -18,7 +18,7 @@ const SECTION_SCHEMAS = {
 type Section = keyof typeof SECTION_SCHEMAS;
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireStaff();
+  const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const { supabase, userId, email } = auth;
 

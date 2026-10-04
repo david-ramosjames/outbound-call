@@ -54,6 +54,7 @@ interface Overrides {
   enableAllActions: boolean;
   transferOutcome: 'connected' | 'no_answer';
   contractOutcome: 'success' | 'fail';
+  agreementStatus: 'signed' | 'viewed' | 'sent' | 'declined';
 }
 
 const SAMPLES = [
@@ -96,6 +97,7 @@ export default function TestAgentPage() {
     enableAllActions: true,
     transferOutcome: 'connected',
     contractOutcome: 'success',
+    agreementStatus: 'signed',
   });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [state, setState] = useState<Record<string, any> | null>(null);
@@ -129,6 +131,7 @@ export default function TestAgentPage() {
             enableAllActions: overrides.enableAllActions,
             transferOutcome: overrides.transferOutcome,
             contractOutcome: overrides.contractOutcome,
+            agreementStatus: overrides.agreementStatus,
           },
         }),
       });
@@ -212,6 +215,15 @@ export default function TestAgentPage() {
             <select className={selectClass} value={overrides.contractOutcome} onChange={(e) => setOverrides((o) => ({ ...o, contractOutcome: e.target.value as Overrides['contractOutcome'] }))}>
               <option value="success">Succeeds</option>
               <option value="fail">Fails</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Status check reports</label>
+            <select className={selectClass} value={overrides.agreementStatus} onChange={(e) => setOverrides((o) => ({ ...o, agreementStatus: e.target.value as Overrides['agreementStatus'] }))}>
+              <option value="signed">Signed</option>
+              <option value="viewed">Opened, not signed</option>
+              <option value="sent">Not opened</option>
+              <option value="declined">Declined</option>
             </select>
           </div>
           <div className="flex flex-col gap-2">

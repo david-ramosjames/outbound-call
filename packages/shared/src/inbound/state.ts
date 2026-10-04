@@ -17,8 +17,14 @@ export interface ContractState {
   provider: string | null;
   externalId: string | null;
   sentAt: string | null;
+  delivery: 'sms' | 'email' | null;
+  resends: number;
+  viewed: boolean;
+  viewedAt: string | null;
   signed: boolean;
   signedAt: string | null;
+  /** Caller declined in the e-sign tool, or the request expired. */
+  closedReason: 'declined' | 'expired' | null;
   lastError: string | null;
 }
 
@@ -60,8 +66,13 @@ export function emptyContractState(): ContractState {
     provider: null,
     externalId: null,
     sentAt: null,
+    delivery: null,
+    resends: 0,
+    viewed: false,
+    viewedAt: null,
     signed: false,
     signedAt: null,
+    closedReason: null,
     lastError: null,
   };
 }

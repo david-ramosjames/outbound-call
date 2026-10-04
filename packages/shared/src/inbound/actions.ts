@@ -1,8 +1,23 @@
 import type { BusinessStatus } from './business-hours.js';
-import type { InboundConfig } from './config.js';
+import type { ContractDeliveryMethod, InboundConfig } from './config.js';
 import { detectUrgentIndicators, getMissingFields } from './intake-engine.js';
 import type { InboundIntakeState } from './state.js';
-import type { NextAction } from './types.js';
+import type { InboundLanguage, NextAction } from './types.js';
+
+/** DocuSeal template for the caller's language; Spanish falls back to English. */
+export function contractTemplateIdFor(config: InboundConfig, language: InboundLanguage): number | null {
+  const c = config.contracts;
+  return (language === 'es' ? c.signflow_template_id_es : null) ?? c.signflow_template_id_en;
+}
+
+/** Ways the agreement can reach this caller right now. Email can be collected on the call. */
+export function contractDeliveryOptions(state: InboundIntakeState, config: InboundConfig): ContractDeliveryMethod[] {
+  const hasPhone = Boolean(state.facts.phone || state.callerIdNumber);
+  const c = config.contracts;
+  if (c.provider === 'signflow') return c.delivery_methods.filter((m) => m === 'email' || hasPhone);
+  if (c.provider === 'sms_link' && !config.flags.sms_enabled) return [];
+  return hasPhone ? ['sms'] : [];
+}
 
 export interface TransferTarget {
   label: 'primary' | 'backup' | 'existing_client';
@@ -16,6 +31,7 @@ export interface AvailableActions {
   nextTransferTarget: TransferTarget | null;
   canOfferContract: boolean;
   contractBlockedReason: string | null;
+  contractDelivery: ContractDeliveryMethod[];
   canSendSms: boolean;
   shouldRequestCallback: boolean;
   callbackPriority: 'urgent' | 'normal';
@@ -70,10 +86,13 @@ export function computeAvailableActions(
   const canTransfer = transferBlockedReason === null;
 
   // ----- Contract -----
+  const contractDelivery = contractDeliveryOptions(state, config);
   let contractBlockedReason: string | null = null;
   if (!flags.contracts_enabled) contractBlockedReason = 'Engagement agreements are turned off';
   else if (contracts.provider === 'none') contractBlockedReason = 'No agreement provider configured';
   else if (!flags.sms_enabled && contracts.provider === 'sms_link') contractBlockedReason = 'SMS is turned off';
+  else if (contracts.provider === 'signflow' && !contractTemplateIdFor(config, state.language))
+    contractBlockedReason = 'No agreement template configured';
   else if (state.contract.sent) contractBlockedReason = 'Agreement already sent';
   else if (!state.qualification) contractBlockedReason = 'Qualification has not been run';
   else if (!state.qualification.canSendContract) contractBlockedReason = 'Qualification does not permit an agreement';
@@ -81,7 +100,7 @@ export function computeAvailableActions(
     contractBlockedReason = 'Qualification result is not eligible for an agreement';
   else if (open && !contracts.business_hours_allowed) contractBlockedReason = 'Agreements not offered during business hours';
   else if (!open && !contracts.after_hours_allowed) contractBlockedReason = 'Agreements not offered after hours';
-  else if (!(facts.phone || state.callerIdNumber)) contractBlockedReason = 'No mobile number to send to';
+  else if (contractDelivery.length === 0) contractBlockedReason = 'No way to deliver the agreement';
   else if (getMissingFields(facts, now).missing.length > 0) contractBlockedReason = 'Finish the intake questions first';
   const canOfferContract = contractBlockedReason === null;
 
@@ -90,6 +109,8 @@ export function computeAvailableActions(
   // ----- Recommendation -----
   const missing = getMissingFields(facts, now);
   const transferFailed = state.transfers.some((t) => t.success === false);
+  const awaitingSignature =
+    contracts.stay_on_line_to_sign && state.contract.sent && !state.contract.signed && !state.contract.closedReason;
   let recommended: NextAction;
 
   if (missing.mode === 'identify_caller') recommended = 'identify_caller';
@@ -100,6 +121,7 @@ export function computeAvailableActions(
   else if (missing.missing.length > 0) recommended = 'continue_intake';
   else if (!state.qualification) recommended = 'complete_intake';
   else if (qual === 'not_qualified') recommended = 'decline_politely';
+  else if (awaitingSignature) recommended = 'help_sign_agreement';
   else if (qual === 'qualified' && canTransfer) recommended = 'offer_transfer';
   else if (canOfferContract && !state.contract.offered) recommended = 'offer_contract';
   else if ((qual === 'qualified' || urgent) && state.callbacks.length === 0) recommended = 'request_callback';
@@ -117,6 +139,7 @@ export function computeAvailableActions(
     nextTransferTarget: canTransfer ? remaining[0] ?? null : null,
     canOfferContract,
     contractBlockedReason,
+    contractDelivery,
     canSendSms,
     shouldRequestCallback,
     callbackPriority,
@@ -139,6 +162,8 @@ function guidanceFor(action: NextAction, business: BusinessStatus, urgent: boole
       return 'Offer to connect them with someone from the team now using the transfer language. If they agree, call transfer_to_human.';
     case 'offer_contract':
       return 'You may offer the engagement agreement using the contract language. Only call send_engagement_agreement after they clearly say yes.';
+    case 'help_sign_agreement':
+      return 'The agreement has been sent. Stay on the line and help them open, review, and sign it. Answer questions from the agreement. When they say they finished, call check_agreement_status; only confirm it is signed if the tool says so. If they would rather sign later, that is fine: request_callback, then complete_intake.';
     case 'request_callback':
       return transferFailed || urgent
         ? `Call request_callback with urgent priority and tell them someone will reach out ${business.status === 'business_hours' ? 'shortly' : followUp}.`

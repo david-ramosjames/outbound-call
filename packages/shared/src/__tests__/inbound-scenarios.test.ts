@@ -361,6 +361,102 @@ describe('inbound intake: 20 seed scenarios', () => {
   });
 });
 
+describe('inbound intake: Sign Flow agreement on the call', () => {
+  function signflowSetup(opts: SimulationOptions = {}, contracts: Record<string, unknown> = {}) {
+    const base = liveConfig();
+    const config = inboundConfigSchema.parse({
+      ...base,
+      contracts: {
+        ...base.contracts,
+        provider: 'signflow',
+        signflow_template_id_en: 101,
+        knowledge_en: 'Contingency fee: 33 1/3% of any recovery before suit is filed.',
+        approved_answers: 'If you do not recover anything, you owe no attorney fee.',
+        ...contracts,
+      },
+    });
+    return setup({ config, now: AFTER_HOURS_NOW, ...opts });
+  }
+
+  it('offers text or email, stays on the line, and confirms the signature only from the status check', async () => {
+    const s = signflowSetup({ agreementStatus: 'viewed' });
+    await strongAuto(s.tool);
+    const actions = availableActionsFor(s.state, s.runtime);
+    expect(actions.recommendedNextAction).toBe('offer_contract');
+    expect(actions.contractDelivery).toEqual(['sms', 'email']);
+
+    const noEmail = await s.tool('send_engagement_agreement', { caller_consented: true, delivery: 'email' });
+    expect(noEmail.ok).toBe(false);
+    expect(s.state.contract.sent).toBe(false);
+
+    const sent = await s.tool('send_engagement_agreement', { caller_consented: true, delivery: 'email', email: 'jane@example.com' });
+    expect(sent.ok).toBe(true);
+    expect(s.log.contracts[0]).toEqual({ to: 'jane@example.com', delivery: 'email' });
+    expect(availableActionsFor(s.state, s.runtime).recommendedNextAction).toBe('help_sign_agreement');
+
+    const opened = await s.tool('check_agreement_status');
+    expect(opened.output).toMatchObject({ opened: true, signed: false });
+    expect(s.state.status).toBe('contract_sent');
+    expect(auditTypes(s.log)).toContain('CONTRACT_VIEWED');
+  });
+
+  it('records a signature reported by the provider', async () => {
+    const s = signflowSetup({ agreementStatus: 'signed' });
+    await strongAuto(s.tool);
+    await s.tool('send_engagement_agreement', { caller_consented: true, delivery: 'sms' });
+    const res = await s.tool('check_agreement_status');
+    expect(res.output).toMatchObject({ opened: true, signed: true });
+    expect(s.state.status).toBe('contract_signed');
+    expect(auditTypes(s.log)).toContain('CONTRACT_SIGNED');
+    expect(availableActionsFor(s.state, s.runtime).recommendedNextAction).not.toBe('help_sign_agreement');
+    expect(formatIntakeSummary(s.state)).toMatch(/sent by text and SIGNED/);
+  });
+
+  it('declined in the form flags the intake for review', async () => {
+    const s = signflowSetup({ agreementStatus: 'declined' });
+    await strongAuto(s.tool);
+    await s.tool('send_engagement_agreement', { caller_consented: true });
+    await s.tool('check_agreement_status');
+    expect(s.state.contract.closedReason).toBe('declined');
+    expect(s.state.needsReviewReasons).toContain('Engagement agreement was not signed');
+  });
+
+  it('resends by the other method', async () => {
+    const s = signflowSetup({ agreementStatus: 'sent' });
+    await strongAuto(s.tool);
+    await s.tool('send_engagement_agreement', { caller_consented: true, delivery: 'sms' });
+    const res = await s.tool('resend_engagement_agreement', { delivery: 'email', email: 'jane@example.com' });
+    expect(res.ok).toBe(true);
+    expect(s.log.contracts[1]).toEqual({ to: 'jane@example.com', delivery: 'email', resend: true });
+    expect(s.state.contract.resends).toBe(1);
+  });
+
+  it('is blocked without a template, and only offers allowed delivery methods', async () => {
+    const none = signflowSetup({}, { signflow_template_id_en: null });
+    await strongAuto(none.tool);
+    expect(availableActionsFor(none.state, none.runtime).contractBlockedReason).toBe('No agreement template configured');
+
+    const smsOnly = signflowSetup({}, { delivery_methods: ['sms'] });
+    await strongAuto(smsOnly.tool);
+    expect((await smsOnly.tool('send_engagement_agreement', { caller_consented: true, delivery: 'email', email: 'a@b.com' })).ok).toBe(false);
+  });
+
+  it('puts the agreement text and approved answers in the prompt', async () => {
+    const s = signflowSetup();
+    await strongAuto(s.tool);
+    const prompt = buildInboundInstructions({
+      instructions: s.runtime.instructions,
+      config: s.runtime.config,
+      state: s.state,
+      business: businessStatusFor(s.runtime),
+      now: AFTER_HOURS_NOW,
+    });
+    expect(prompt).toContain('Contingency fee: 33 1/3%');
+    expect(prompt).toContain('you owe no attorney fee');
+    expect(prompt).toContain('check_agreement_status');
+  });
+});
+
 describe('inbound intake: qualification reasons are internal', () => {
   it('evaluate_qualification output does not expose the result or reasons', async () => {
     const s = setup();

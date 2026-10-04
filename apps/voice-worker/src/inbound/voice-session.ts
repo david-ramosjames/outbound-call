@@ -1,11 +1,16 @@
 import WebSocket from 'ws';
 import {
+  agreementStatusGuidance,
+  applyAgreementStatus,
+  availableActionsFor,
   buildInboundGreeting,
   buildInboundInstructions,
   businessStatusFor,
   checkAgentUtterance,
+  deriveIntakeStatus,
   executeInboundTool,
   getInboundToolDefinitions,
+  type AgreementStatus,
   type InboundIntakeState,
   type InboundRuntime,
 } from '@outbound-call/shared';
@@ -31,6 +36,7 @@ export class InboundVoiceSession {
   private agentText = '';
   private greetingSent = false;
   private closing = false;
+  private responseActive = false;
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -141,6 +147,12 @@ export class InboundVoiceSession {
       case 'session.updated':
         this.sendGreeting();
         break;
+      case 'response.created':
+        this.responseActive = true;
+        break;
+      case 'response.done':
+        this.responseActive = false;
+        break;
       case 'response.audio_transcript.delta':
       case 'response.output_audio_transcript.delta':
         this.agentText += String(event.delta ?? '');
@@ -213,6 +225,34 @@ export class InboundVoiceSession {
   private sendToolResult(callId: string, output: Record<string, unknown>, respond = true): void {
     this.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) } });
     if (respond) this.send({ type: 'response.create' });
+  }
+
+  /** E-sign provider reported a status change while the caller is still on the line. */
+  async applyContractEvent(status: AgreementStatus, source: string): Promise<{ status: string }> {
+    const changed = await applyAgreementStatus(this.state, status, this.runtime.audit, new Date(), source);
+    if (!changed) return { status: this.state.status };
+    this.state.status = deriveIntakeStatus(this.state);
+    this.state.recommendedNextAction = availableActionsFor(this.state, this.runtime).recommendedNextAction;
+    await this.runtime.persist(this.state);
+
+    const c = this.state.contract;
+    const note = c.signed
+      ? 'The caller has just SIGNED the engagement agreement (confirmed by the e-signature system).'
+      : c.closedReason
+        ? `The engagement agreement was ${c.closedReason} in the e-signature system.`
+        : 'The caller has just opened the engagement agreement.';
+    this.send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'system',
+        content: [{ type: 'input_text', text: `System note: ${note} ${agreementStatusGuidance(this.state, true)}` }],
+      },
+    });
+    // Speak up for the important moments, but don't talk over the agent or the caller mid-turn.
+    if ((c.signed || c.closedReason) && !this.responseActive && !this.closing) this.send({ type: 'response.create' });
+    await saveTranscript(this.callId, 'system', note, this.state.language);
+    return { status: this.state.status };
   }
 
   async end(reason: string): Promise<void> {

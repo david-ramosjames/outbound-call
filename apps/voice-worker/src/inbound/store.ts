@@ -151,6 +151,8 @@ function hydrateState(intakeId: string, callId: string, raw: unknown): InboundIn
 
 function contractStatus(state: InboundIntakeState): string {
   if (state.contract.signed) return 'signed';
+  if (state.contract.closedReason) return state.contract.closedReason;
+  if (state.contract.viewed) return 'opened';
   if (state.contract.sent) return 'sent';
   if (state.contract.lastError) return 'failed';
   return 'none';

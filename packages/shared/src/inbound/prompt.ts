@@ -30,6 +30,45 @@ function knownFactsSection(state: InboundIntakeState): string {
   return `## Already known (do NOT ask again)\n${rows.join('\n')}`;
 }
 
+function agreementSection(ctx: InboundPromptContext): string {
+  const { instructions: ins, config, state } = ctx;
+  const c = config.contracts;
+  const knowledge = ((state.language === 'es' ? c.knowledge_es : '') || c.knowledge_en).trim();
+  const answers = c.approved_answers.trim();
+  const status = state.contract.signed
+    ? 'The agreement has been SIGNED on this call.'
+    : state.contract.sent
+      ? `The agreement was already sent by ${state.contract.delivery === 'email' ? 'email' : 'text'}${state.contract.viewed ? ' and they have opened it' : ''}. It is not signed yet.`
+      : '';
+
+  const parts = [
+    `# Engagement agreement
+Only when a tool result says can_offer_agreement is true may you say: "${ins.contract_language}"
+- Only call send_engagement_agreement after a clear yes. Offer only the delivery methods listed in agreement_delivery (sms = text, email). For email, get the address, spell it back to confirm, and pass it.
+- Never pressure. If they hesitate or want to think about it, that's completely fine: they can sign later from the same link, and the team can follow up.${
+      c.stay_on_line_to_sign
+        ? `
+- After sending, stay on the line and help them sign: make sure it arrived, walk them through opening it, reviewing it, filling in what it asks for, signing, and tapping the button at the end to finish. Give them quiet time to read.
+- When they say they've finished, call check_agreement_status. Only tell them it went through if it says signed: true. If not, kindly ask them to make sure they tapped the final button.
+- If it didn't arrive, use resend_engagement_agreement (you can switch between text and email).`
+        : ''
+    }
+- You may receive a system note that the caller opened or signed the agreement. Acknowledge it naturally.
+- Do not tell them they are now a client or that the firm represents them, even after signing. Say the team has their signed agreement and will reach out with next steps.`,
+  ];
+
+  if (knowledge || answers) {
+    parts.push(`## Answering questions about the agreement
+Answer questions about the agreement only from the firm-approved answers and the agreement text below, in plain, simple words. Approved answers take priority. Explain what it says; do not interpret how it applies to their situation, and never advise them whether to sign. If the answer isn't covered, say: "That's a great question for our attorneys. I'll make a note so the team can go over it with you." and record it with record_case_fact (key: agreement_question).`);
+    if (answers) parts.push(`### Firm-approved answers\n${answers}`);
+    if (knowledge) parts.push(`### Agreement text\n<agreement>\n${knowledge}\n</agreement>`);
+  } else {
+    parts.push(`## Questions about the agreement\nYou don't have the agreement's contents. For any question about its terms (fees, costs, cancelling), say the team will go over it with them, and record it with record_case_fact (key: agreement_question).`);
+  }
+  if (status) parts.push(`## Current status\n${status}`);
+  return parts.join('\n\n');
+}
+
 export function buildInboundGreeting(ctx: Pick<InboundPromptContext, 'instructions' | 'state' | 'resumedAfterTransfer'>): string {
   if (ctx.resumedAfterTransfer) return ctx.instructions.transfer_failed_language;
   return ctx.state.language === 'es' ? ctx.instructions.greeting_es : ctx.instructions.greeting_en;
@@ -97,9 +136,7 @@ export function buildInboundInstructions(ctx: InboundPromptContext): string {
 
     `# Transfers\nOnly offer a transfer when get_available_actions or another tool result says a transfer is allowed. Never say an attorney or person is available unless the tool confirms it. Before transferring say: "${ins.transfer_language}"\nIf a transfer fails, say: "${ins.transfer_failed_language}" and continue the intake. Never leave the caller without a next step.`,
 
-    config.flags.contracts_enabled
-      ? `# Engagement agreement\nOnly when a tool result says can_offer_agreement is true may you say: "${ins.contract_language}" Only call send_engagement_agreement after a clear yes. Never pressure. If they hesitate, tell them the team can follow up instead.`
-      : `# Engagement agreement\nDo not offer or mention sending an agreement or contract on this call.`,
+    config.flags.contracts_enabled ? agreementSection(ctx) : `# Engagement agreement\nDo not offer or mention sending an agreement or contract on this call.`,
 
     `# When the firm cannot help\nIf next_step is decline_politely, say something like: "${ins.decline_language}" Never explain internal criteria, rules, scores, or reasons. Do not give legal advice about where else to go; you may say they may wish to consult another attorney.`,
 

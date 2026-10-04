@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONTRACT_DELIVERY_METHODS } from './config.js';
 import { INBOUND_CALLER_TYPES, INBOUND_CASE_TYPES, INBOUND_LANGUAGES, INJURY_SEVERITIES } from './types.js';
 
 // ---------- Argument schemas (validated server-side before anything runs) ----------
@@ -26,7 +27,17 @@ export const inboundToolArgSchemas = {
     phone: z.string().optional(),
     urgent: z.boolean().optional(),
   }),
-  send_engagement_agreement: z.object({ caller_consented: z.literal(true) }),
+  send_engagement_agreement: z.object({
+    caller_consented: z.literal(true),
+    delivery: z.enum(CONTRACT_DELIVERY_METHODS).optional(),
+    email: z.string().max(200).optional(),
+  }),
+  check_agreement_status: z.object({}).passthrough(),
+  resend_engagement_agreement: z.object({
+    delivery: z.enum(CONTRACT_DELIVERY_METHODS),
+    email: z.string().max(200).optional(),
+    phone: z.string().max(40).optional(),
+  }),
   send_sms: z.object({ template: z.enum(['office_contact_info', 'callback_confirmation']) }),
   mark_high_priority: z.object({ reason: z.string().min(1).max(500) }),
   mark_needs_review: z.object({ reason: z.string().min(1).max(500) }),
@@ -181,8 +192,36 @@ export function getInboundToolDefinitions(): ToolDef[] {
     {
       type: 'function',
       name: 'send_engagement_agreement',
-      description: 'Text the engagement agreement to the caller. Only after get_available_actions allows it AND the caller clearly said yes.',
-      parameters: obj({ caller_consented: { type: 'boolean', enum: [true], description: 'Caller explicitly agreed' } }, ['caller_consented']),
+      description:
+        'Send the engagement agreement for e-signature. Only after a tool says can_offer_agreement is true AND the caller clearly said yes. Ask whether they prefer text or email (only offer the methods listed in agreement_delivery).',
+      parameters: obj(
+        {
+          caller_consented: { type: 'boolean', enum: [true], description: 'Caller explicitly agreed' },
+          delivery: enumOf(CONTRACT_DELIVERY_METHODS, 'sms = text to their phone, email = send to their email'),
+          email: str('Email address as spoken and confirmed, if sending by email and not already saved'),
+        },
+        ['caller_consented'],
+      ),
+    },
+    {
+      type: 'function',
+      name: 'check_agreement_status',
+      description:
+        'Check whether the caller has opened and signed the agreement. Call when they say they finished signing, or after they have had a minute or two. Never tell them it is signed unless this says signed: true.',
+      parameters: obj({}),
+    },
+    {
+      type: 'function',
+      name: 'resend_engagement_agreement',
+      description: 'Re-send the agreement link if they did not get it, or by the other method (text vs email), or to a corrected email/number.',
+      parameters: obj(
+        {
+          delivery: enumOf(CONTRACT_DELIVERY_METHODS, 'sms or email'),
+          email: str('Corrected email address, if any'),
+          phone: str('Corrected mobile number, if any'),
+        },
+        ['delivery'],
+      ),
     },
     {
       type: 'function',

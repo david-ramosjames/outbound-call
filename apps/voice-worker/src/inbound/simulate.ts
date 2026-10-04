@@ -44,6 +44,7 @@ export const simulateRequestSchema = z.object({
       enableAllActions: z.boolean().optional(),
       transferOutcome: z.enum(['connected', 'no_answer']).optional(),
       contractOutcome: z.enum(['success', 'fail']).optional(),
+      agreementStatus: z.enum(['sent', 'viewed', 'signed', 'declined']).optional(),
     })
     .default({}),
 });
@@ -64,6 +65,7 @@ function withAllActions(cfg: InboundConfig): InboundConfig {
       ...cfg.contracts,
       provider: cfg.contracts.provider === 'none' ? 'sms_link' : cfg.contracts.provider,
       sms_link_url: cfg.contracts.sms_link_url || 'https://example.com/sign/{{intake_id}}',
+      signflow_template_id_en: cfg.contracts.signflow_template_id_en ?? 1,
     },
   });
 }
@@ -96,6 +98,7 @@ export async function runSimulationTurn(req: SimulateRequest) {
     businessOverride: req.overrides.businessStatus ?? null,
     transferOutcomes: [outcome, outcome, outcome],
     contractOutcome: req.overrides.contractOutcome ?? 'success',
+    agreementStatus: req.overrides.agreementStatus ?? 'signed',
   });
 
   let state: InboundIntakeState;

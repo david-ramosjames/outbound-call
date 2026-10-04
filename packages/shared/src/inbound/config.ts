@@ -73,11 +73,28 @@ export type RoutingConfig = z.infer<typeof routingSchema>;
 
 // ---------- Contracts ----------
 
-export const CONTRACT_PROVIDERS = ['none', 'sms_link', 'webhook'] as const;
+export const CONTRACT_PROVIDERS = ['none', 'signflow', 'sms_link', 'webhook'] as const;
 export type ContractProviderName = (typeof CONTRACT_PROVIDERS)[number];
+
+export const CONTRACT_DELIVERY_METHODS = ['sms', 'email'] as const;
+export type ContractDeliveryMethod = (typeof CONTRACT_DELIVERY_METHODS)[number];
+
+const templateIdSchema = z.number().int().positive().nullable().default(null);
 
 export const contractsSchema = z.object({
   provider: z.enum(CONTRACT_PROVIDERS).default('none'),
+  /** signflow provider: DocuSeal template per language (Spanish falls back to English when unset). */
+  signflow_template_id_en: templateIdSchema,
+  signflow_template_id_es: templateIdSchema,
+  /** How the signing link may be delivered (signflow provider). The caller picks one. */
+  delivery_methods: z.array(z.enum(CONTRACT_DELIVERY_METHODS)).default(['sms', 'email']),
+  /** Keep the caller on the line after sending and help them sign. */
+  stay_on_line_to_sign: z.boolean().default(true),
+  /** What the agreement says, so the AI can answer questions. Spanish falls back to English when empty. */
+  knowledge_en: z.string().max(60000).default(''),
+  knowledge_es: z.string().max(60000).default(''),
+  /** Firm-approved answers to common questions (fees, costs, cancelling...). Takes priority over the agreement text. */
+  approved_answers: z.string().max(20000).default(''),
   allowed_results: z.array(z.enum(QUALIFICATION_RESULTS)).default(['qualified']),
   business_hours_allowed: z.boolean().default(true),
   after_hours_allowed: z.boolean().default(true),
@@ -457,7 +474,7 @@ export const agentInstructionsSchema = z.object({
   contract_language: z
     .string()
     .default(
-      "Based on the information you've provided, I can text you our engagement agreement to review and sign. Would you like me to send it?",
+      "Based on the information you've provided, I can send you our engagement agreement to review and sign right now, by text or email. Would you like me to send it?",
     ),
   decline_language: z
     .string()

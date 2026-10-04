@@ -91,7 +91,11 @@ export function formatIntakeSummary(state: InboundIntakeState): string {
   for (const t of state.transfers) {
     actions.push(`Transfer to ${t.label}: ${t.success === true ? 'connected' : t.success === false ? `failed (${t.failureReason ?? 'no answer'})` : 'attempted'}.`);
   }
-  if (state.contract.sent) actions.push(`Engagement agreement sent by SMS${state.contract.signed ? ' and SIGNED' : ''}.`);
+  if (state.contract.sent) {
+    const c = state.contract;
+    const outcome = c.signed ? ' and SIGNED' : c.closedReason ? ` and ${c.closedReason.toUpperCase()}` : c.viewed ? ' and opened, not signed' : ', not opened yet';
+    actions.push(`Engagement agreement sent by ${c.delivery === 'email' ? 'email' : 'text'}${outcome}.`);
+  }
   else if (state.contract.lastError) actions.push('Engagement agreement FAILED to send.');
   for (const c of state.callbacks) {
     actions.push(`${c.priority === 'urgent' ? 'Urgent callback' : 'Callback'} requested${c.preferredTime ? ` (${c.preferredTime})` : ''}: ${c.reason}`);

@@ -1,7 +1,7 @@
 import { normalizePhoneCapture } from '../utils/capture-validation.js';
 import { computeAvailableActions, type AvailableActions, type TransferTarget } from './actions.js';
 import { getBusinessStatus, type BusinessStatus } from './business-hours.js';
-import type { AgentInstructions, InboundConfig } from './config.js';
+import type { AgentInstructions, ContractDeliveryMethod, InboundConfig } from './config.js';
 import { applyFactUpdates, currentIntakeStage, detectUrgentIndicators, getMissingFields, URGENT_INDICATOR_LABELS } from './intake-engine.js';
 import { evaluateQualification } from './qualification.js';
 import type { InboundIntakeState } from './state.js';
@@ -30,8 +30,59 @@ export interface ContractSendResult {
   error?: string;
 }
 
+export interface ContractDeliveryRequest {
+  delivery: ContractDeliveryMethod;
+  phone: string | null;
+  email: string | null;
+}
+
+export const AGREEMENT_STATUSES = ['sent', 'viewed', 'signed', 'declined', 'expired', 'cancelled', 'unknown'] as const;
+export type AgreementStatus = (typeof AGREEMENT_STATUSES)[number];
+
 export interface InboundContractService {
-  sendAgreement(state: InboundIntakeState, toPhone: string): Promise<ContractSendResult>;
+  sendAgreement(state: InboundIntakeState, request: ContractDeliveryRequest): Promise<ContractSendResult>;
+  /** Providers that can report signing status (e.g. Sign Flow). */
+  getStatus?(state: InboundIntakeState): Promise<{ ok: true; status: AgreementStatus } | { ok: false; error: string }>;
+  resend?(state: InboundIntakeState, request: ContractDeliveryRequest): Promise<{ ok: true } | { ok: false; error: string }>;
+}
+
+/**
+ * Record a signing status reported by the provider (tool check or webhook). Returns true when
+ * anything changed; the caller re-derives status and persists.
+ */
+export async function applyAgreementStatus(
+  state: InboundIntakeState,
+  status: AgreementStatus,
+  audit: (event: AuditEventInput) => Promise<void>,
+  now: Date,
+  source: string,
+): Promise<boolean> {
+  const c = state.contract;
+  if (!c.sent || c.signed) return false;
+  const at = now.toISOString();
+  let changed = false;
+  if ((status === 'viewed' || status === 'signed') && !c.viewed) {
+    c.viewed = true;
+    c.viewedAt = at;
+    changed = true;
+    if (status === 'viewed') await audit({ type: 'CONTRACT_VIEWED', actor: 'SYSTEM', data: { source } });
+  }
+  if (status === 'signed') {
+    c.signed = true;
+    c.signedAt = at;
+    c.closedReason = null;
+    await audit({ type: 'CONTRACT_SIGNED', actor: 'SYSTEM', data: { source, external_id: c.externalId } });
+    return true;
+  }
+  if ((status === 'declined' || status === 'expired' || status === 'cancelled') && !c.closedReason) {
+    c.closedReason = status === 'declined' ? 'declined' : 'expired';
+    await audit({ type: 'CONTRACT_DECLINED', actor: 'SYSTEM', data: { source, status } });
+    if (!state.needsReviewReasons.includes('Engagement agreement was not signed')) {
+      state.needsReviewReasons.push('Engagement agreement was not signed');
+    }
+    return true;
+  }
+  return changed;
 }
 
 /** Everything the executor needs from the outside world. Live calls use DB/Twilio; the Test Agent uses in-memory fakes. */
@@ -80,6 +131,30 @@ export function deriveIntakeStatus(state: InboundIntakeState): InboundIntakeStat
 
 function reject(name: string, error: string): ToolExecution {
   return { name, ok: false, output: { ok: false, error } };
+}
+
+/** Save a spoken email if given; returns a problem when there is still no valid email on file. */
+function saveEmailFact(state: InboundIntakeState, spoken: string | undefined): string | null {
+  if (spoken) {
+    const r = applyFactUpdates(state.facts, { email: spoken });
+    if (r.rejected.length) return r.rejected[0]!.problem;
+    state.facts = r.facts;
+  }
+  return state.facts.email ? null : 'No email address on file yet.';
+}
+
+export function agreementStatusGuidance(state: InboundIntakeState, canCheck: boolean): string {
+  const c = state.contract;
+  if (c.signed)
+    return 'It is signed. Thank them warmly and let them know the team has their signed agreement and will reach out with next steps. Then make sure a callback is requested if needed, call complete_intake, and close.';
+  if (c.closedReason === 'declined')
+    return 'They declined to sign in the form. Do not pressure. Ask if they have concerns, note them, and request_callback so someone from the team can talk it through.';
+  if (c.closedReason === 'expired')
+    return 'That signing link is no longer active. Let them know the team will follow up, and request_callback.';
+  if (!canCheck) return 'Signing status cannot be checked on this call. Let them know the team will confirm once it comes through.';
+  if (c.viewed)
+    return 'They have it open but it is not signed yet. Ask if they have any questions. Remind them to sign and tap the button at the end to finish, then check again.';
+  return 'It has not been opened yet. Ask if the message arrived (it can take a minute, and texts or emails sometimes land in spam or filtered messages). Offer to resend, or send it the other way.';
 }
 
 function fillTemplate(text: string, vars: Record<string, string>): string {
@@ -141,7 +216,7 @@ export async function executeInboundTool(
     await runtime.audit({ type: 'TOOL_REJECTED', actor: 'SYSTEM', data: { tool: name, error } });
     return reject(name, `Invalid arguments: ${error}`);
   }
-  if (state.completed && !['end_call', 'request_callback', 'send_sms', 'get_business_status'].includes(name)) {
+  if (state.completed && !['end_call', 'request_callback', 'send_sms', 'get_business_status', 'check_agreement_status'].includes(name)) {
     return reject(name, 'Intake is already completed. Close the call.');
   }
   return run(name, parsed.data as never, state, runtime);
@@ -254,6 +329,7 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
           guidance: actions.guidance,
           can_transfer: actions.canTransfer,
           can_offer_agreement: actions.canOfferContract,
+          ...(actions.canOfferContract ? { agreement_delivery: actions.contractDelivery } : {}),
           note: 'This evaluation is internal. Never tell the caller about criteria, scores, or reasons.',
         },
       };
@@ -279,6 +355,8 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
           can_transfer: a.canTransfer,
           transfer_note: a.canTransfer ? null : a.transferBlockedReason,
           can_offer_agreement: a.canOfferContract,
+          ...(a.canOfferContract ? { agreement_delivery: a.contractDelivery } : {}),
+          ...(state.contract.sent ? { agreement: { opened: state.contract.viewed, signed: state.contract.signed } } : {}),
           can_text_caller: a.canSendSms,
           should_request_callback: a.shouldRequestCallback,
           callback_priority: a.callbackPriority,
@@ -392,12 +470,23 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
           output: { ok: false, error: 'An agreement cannot be sent right now.', guidance: 'Do not mention the agreement again. Let them know the team will follow up.' },
         };
       }
-      const to = state.facts.phone ?? state.callerIdNumber!;
+      const delivery: ContractDeliveryMethod = args.delivery ?? a.contractDelivery[0]!;
+      if (!a.contractDelivery.includes(delivery)) {
+        return { name, ok: false, output: { ok: false, error: `The agreement cannot be sent by ${delivery === 'sms' ? 'text' : 'email'}.`, agreement_delivery: a.contractDelivery } };
+      }
+      if (delivery === 'email') {
+        const emailProblem = saveEmailFact(state, args.email);
+        if (emailProblem) return { name, ok: false, output: { ok: false, error: emailProblem, ask: 'Ask for their email address, spell it back to confirm, then call send_engagement_agreement again with email.' } };
+      }
       state.contract.offered = true;
       state.contract.offeredAt ??= runtime.now().toISOString();
-      await runtime.audit({ type: 'CONTRACT_OFFERED', actor: 'AI', data: { accepted: true } });
+      await runtime.audit({ type: 'CONTRACT_OFFERED', actor: 'AI', data: { accepted: true, delivery } });
 
-      const res = await runtime.contracts.sendAgreement(state, to);
+      const res = await runtime.contracts.sendAgreement(state, {
+        delivery,
+        phone: state.facts.phone ?? state.callerIdNumber,
+        email: state.facts.email ?? null,
+      });
       if (!res.ok) {
         state.contract.lastError = res.error ?? 'unknown error';
         await runtime.audit({ type: 'CONTRACT_SEND_FAILED', actor: 'SYSTEM', data: { provider: res.provider, error: res.error } });
@@ -418,15 +507,69 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
       state.contract.provider = res.provider;
       state.contract.externalId = res.externalId ?? null;
       state.contract.sentAt = runtime.now().toISOString();
+      state.contract.delivery = delivery;
       state.contract.lastError = null;
-      await runtime.audit({ type: 'CONTRACT_SENT', actor: 'SYSTEM', data: { provider: res.provider, external_id: res.externalId ?? null } });
+      await runtime.audit({ type: 'CONTRACT_SENT', actor: 'SYSTEM', data: { provider: res.provider, delivery, external_id: res.externalId ?? null } });
       await refreshDerivedState(state, runtime);
       await runtime.persist(state);
+      const where = delivery === 'email' ? `emailed to ${state.facts.email}` : 'texted to their phone';
       return {
         name,
         ok: true,
-        output: { ok: true, sent: true, tell_caller: 'The agreement was texted to them. They can review and sign it on their phone, and call with any questions.' },
+        output: {
+          ok: true,
+          sent: true,
+          tell_caller: `The agreement was ${where}. It can take a minute to arrive.`,
+          guidance: config.contracts.stay_on_line_to_sign
+            ? 'Offer to stay on the line while they open it. Walk them through it: open the link, read through the agreement, fill in anything it asks for, sign, and tap the button at the end to finish. Answer questions from the agreement. When they say they are done, call check_agreement_status.'
+            : 'Let them know they can review and sign whenever they are ready, and call with any questions.',
+        },
       };
+    }
+
+    case 'check_agreement_status': {
+      const c = state.contract;
+      if (!c.sent) return reject(name, 'No agreement has been sent on this call.');
+      if (!c.signed && runtime.contracts.getStatus) {
+        const res = await runtime.contracts.getStatus(state);
+        if (!res.ok) {
+          return { name, ok: false, output: { ok: false, error: 'Could not check right now.', guidance: 'Wait a moment and check again, or let them know the team will confirm.' } };
+        }
+        if (await applyAgreementStatus(state, res.status, runtime.audit, runtime.now(), 'status_check')) {
+          await refreshDerivedState(state, runtime);
+          await runtime.persist(state);
+        }
+      }
+      return { name, ok: true, output: { ok: true, opened: c.viewed, signed: c.signed, guidance: agreementStatusGuidance(state, Boolean(runtime.contracts.getStatus)) } };
+    }
+
+    case 'resend_engagement_agreement': {
+      const c = state.contract;
+      if (!c.sent || c.signed || c.closedReason) return reject(name, c.signed ? 'The agreement is already signed.' : 'There is no open agreement to resend.');
+      if (!runtime.contracts.resend) return reject(name, 'Resending is not available. Let them know the team will follow up.');
+      if (c.resends >= 3) return reject(name, 'Already resent several times. Request a callback so the team can help.');
+      if (args.delivery === 'email') {
+        const emailProblem = saveEmailFact(state, args.email);
+        if (emailProblem) return { name, ok: false, output: { ok: false, error: emailProblem, ask: 'Ask for their email address and spell it back.' } };
+      } else if (args.phone) {
+        const r = applyFactUpdates(state.facts, { phone: args.phone });
+        if (r.rejected.length) return { name, ok: false, output: { ok: false, error: r.rejected[0]!.problem, ask: 'Ask them to repeat the full 10-digit mobile number.' } };
+        state.facts = r.facts;
+      }
+      const phone = state.facts.phone ?? state.callerIdNumber;
+      if (args.delivery === 'sms' && (!phone || !config.contracts.delivery_methods.includes('sms'))) return reject(name, 'The agreement cannot be texted.');
+      if (args.delivery === 'email' && !config.contracts.delivery_methods.includes('email')) return reject(name, 'The agreement cannot be emailed.');
+
+      const res = await runtime.contracts.resend(state, { delivery: args.delivery, phone, email: state.facts.email ?? null });
+      if (!res.ok) {
+        await runtime.audit({ type: 'CONTRACT_SEND_FAILED', actor: 'SYSTEM', data: { resend: true, delivery: args.delivery, error: res.error } });
+        return { name, ok: false, output: { ok: false, error: 'It could not be resent just now.', guidance: 'Apologize and request_callback so the team can get it to them.' } };
+      }
+      c.resends += 1;
+      c.delivery = args.delivery;
+      await runtime.audit({ type: 'CONTRACT_RESENT', actor: 'AI', data: { delivery: args.delivery } });
+      await runtime.persist(state);
+      return { name, ok: true, output: { ok: true, tell_caller: args.delivery === 'email' ? `Sent again to ${state.facts.email}.` : 'Texted again.' } };
     }
 
     case 'send_sms': {

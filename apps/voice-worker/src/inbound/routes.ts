@@ -2,10 +2,13 @@ import crypto from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import type { Router as RouterType } from 'express';
 import {
+  AGREEMENT_STATUSES,
+  applyAgreementStatus,
   computeAvailableActions,
   deriveIntakeStatus,
   getBusinessStatus,
   INBOUND_CASE_TYPE_LABELS,
+  type AgreementStatus,
 } from '@outbound-call/shared';
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
@@ -24,6 +27,7 @@ import {
   writeAudit,
 } from './store.js';
 import { escapeXml, fallbackTwiml, sipBridgeTwiml, transferDialTwiml, twiml, validateTwilioRequest } from './telephony.js';
+import { getActiveInboundSession } from './voice-session.js';
 
 export const inboundRouter: RouterType = Router();
 
@@ -210,6 +214,11 @@ inboundRouter.post('/webhooks/inbound/contracts/:provider', async (req: Request,
   }
 
   const body = (req.body ?? {}) as { intake_id?: string; external_id?: string; status?: string };
+  const status = body.status as AgreementStatus | undefined;
+  if (!status || !(AGREEMENT_STATUSES as readonly string[]).includes(status)) {
+    res.status(400).json({ error: 'Unknown status' });
+    return;
+  }
   let intakeId = body.intake_id ?? null;
   if (!intakeId && body.external_id) {
     const { data } = await supabase.from('inbound_intakes').select('id').eq('contract_external_id', body.external_id).maybeSingle();
@@ -220,16 +229,23 @@ inboundRouter.post('/webhooks/inbound/contracts/:provider', async (req: Request,
     res.status(404).json({ error: 'Intake not found' });
     return;
   }
+  if (body.external_id && state.contract.externalId && body.external_id !== state.contract.externalId) {
+    res.status(409).json({ error: 'Signing request does not match this intake' });
+    return;
+  }
+  const source = `webhook:${req.params.provider}`;
 
-  if (body.status === 'signed' && !state.contract.signed) {
-    state.contract.signed = true;
-    state.contract.signedAt = new Date().toISOString();
+  // Caller still on the line: the live session owns the state and tells the agent.
+  const session = state.callId ? getActiveInboundSession(state.callId) : undefined;
+  if (session) {
+    res.status(200).json({ ok: true, ...(await session.applyContractEvent(status, source)) });
+    return;
+  }
+
+  const ids = { callId: state.callId, intakeId: state.intakeId };
+  if (await applyAgreementStatus(state, status, (e) => writeAudit(ids, e), new Date(), source)) {
     state.status = deriveIntakeStatus(state);
     await saveIntakeState(state);
-    await writeAudit(
-      { callId: state.callId, intakeId: state.intakeId },
-      { type: 'CONTRACT_SIGNED', actor: 'SYSTEM', data: { provider: req.params.provider, external_id: body.external_id ?? null } },
-    );
   }
   res.status(200).json({ ok: true, status: state.status });
 });

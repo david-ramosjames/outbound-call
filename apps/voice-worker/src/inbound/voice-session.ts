@@ -24,6 +24,9 @@ import { hangUpCall } from './telephony.js';
 
 const activeSessions = new Map<string, InboundVoiceSession>();
 
+/** Silence kept on the line after the goodbye finishes, in case the caller has one more question. */
+const END_GRACE_MS = 3000;
+
 export function getActiveInboundSession(callId: string): InboundVoiceSession | undefined {
   return activeSessions.get(callId);
 }
@@ -39,6 +42,10 @@ export class InboundVoiceSession {
   private responseActive = false;
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
   private lastCaller: { segmentId: number | null; itemId: string | null; text: string } | null = null;
+  private endRequested: string | null = null;
+  private endTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the agent's queued speech should finish playing (estimated). */
+  private speechEndsAt = 0;
 
   constructor(
     private readonly callId: string,
@@ -103,6 +110,7 @@ export class InboundVoiceSession {
 
     this.ws.on('close', () => {
       if (this.maxTimer) clearTimeout(this.maxTimer);
+      if (this.endTimer) clearTimeout(this.endTimer);
       activeSessions.delete(this.callId);
       void this.flushAgentText();
       if (this.state.transferInProgress) {
@@ -168,6 +176,9 @@ export class InboundVoiceSession {
         await this.recordAgentText(text);
         break;
       }
+      case 'input_audio_buffer.speech_started':
+        this.cancelPendingEnd();
+        break;
       case 'conversation.item.input_audio_transcription.completed': {
         const text = String(event.transcript ?? '').trim();
         if (text) await this.recordCallerText(text, typeof event.item_id === 'string' ? event.item_id : null);
@@ -214,6 +225,8 @@ export class InboundVoiceSession {
 
   private async recordAgentText(text: string): Promise<void> {
     if (!text.trim()) return;
+    this.speechEndsAt = Math.max(Date.now(), this.speechEndsAt) + InboundVoiceSession.speechMs(text);
+    if (this.endTimer) this.scheduleEnd();
     this.lastCaller = null;
     await saveTranscript(this.callId, 'agent', text, this.state.language);
     const violations = checkAgentUtterance(text);
@@ -245,8 +258,51 @@ export class InboundVoiceSession {
       this.sendToolResult(toolCallId, result.output, false);
       return;
     }
-    this.sendToolResult(toolCallId, result.output);
-    if (result.endCall) setTimeout(() => void this.end('agent_end_call'), 4000);
+    this.sendToolResult(toolCallId, result.output, !result.endCall);
+    if (result.endCall) {
+      this.endRequested = 'agent_end_call';
+      this.scheduleEnd();
+    }
+  }
+
+  /** Rough playback time of spoken text; the realtime API sends text faster than the audio plays. */
+  private static speechMs(text: string): number {
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    return words * 380 + 400;
+  }
+
+  /** Hang up only after the goodbye has finished playing plus a short pause in case the caller has a question. */
+  private scheduleEnd(): void {
+    if (!this.endRequested || this.closing) return;
+    if (this.endTimer) clearTimeout(this.endTimer);
+    const wait = Math.max(0, this.speechEndsAt - Date.now()) + END_GRACE_MS;
+    const reason = this.endRequested;
+    this.endTimer = setTimeout(() => {
+      this.endTimer = null;
+      if (this.endRequested) void this.end(reason);
+    }, wait);
+  }
+
+  /** The caller spoke during the closing pause: stay on the line and let the agent answer. */
+  private cancelPendingEnd(): void {
+    if (!this.endRequested || this.closing) return;
+    if (this.endTimer) clearTimeout(this.endTimer);
+    this.endTimer = null;
+    this.endRequested = null;
+    logger.info('Caller spoke after goodbye; staying on the line', this.logCtx);
+    this.send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'system',
+        content: [
+          {
+            type: 'input_text',
+            text: 'System note: the caller spoke after you said goodbye. Answer them briefly, then say goodbye again and call end_call.',
+          },
+        ],
+      },
+    });
   }
 
   private sendToolResult(callId: string, output: Record<string, unknown>, respond = true): void {

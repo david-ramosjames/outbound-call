@@ -88,6 +88,7 @@ export class InboundVoiceSession {
       call,
       state,
       signflowFirmId: settings.line.signflow_firm_id,
+      lineIsDefault: settings.line.is_default,
     });
     activeSessions.set(this.callId, this);
 

@@ -77,12 +77,20 @@ export function signflowCallbackUrl(): string | undefined {
   return base?.startsWith('https://') ? `${base}/webhooks/inbound/contracts/signflow` : undefined;
 }
 
-export function createContractService(config: InboundConfig, smsFrom: string, line: { signflowFirmId?: string } = {}): InboundContractService {
+export function createContractService(
+  config: InboundConfig,
+  smsFrom: string,
+  line: { signflowFirmId?: string; isDefault?: boolean } = {},
+): InboundContractService {
   const c = config.contracts;
 
   if (c.provider === 'signflow') {
     return {
       async sendAgreement(state: InboundIntakeState, req: ContractDeliveryRequest): Promise<ContractSendResult> {
+        // Without an account, Sign Flow would use its default firm, i.e. another firm's DocuSeal and templates.
+        if (!line.signflowFirmId && line.isDefault === false) {
+          return { ok: false, provider: c.provider, error: 'This intake line has no Sign Flow account set' };
+        }
         const templateId = contractTemplateIdFor(config, state.language);
         if (!templateId) return { ok: false, provider: c.provider, error: 'No Sign Flow template configured' };
         const phone = toE164(req.phone);

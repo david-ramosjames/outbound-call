@@ -28,6 +28,93 @@ interface TemplateOption {
   folder?: string | null;
 }
 
+interface FirmOption {
+  id: string;
+  name: string;
+  docusealConfigured?: boolean;
+}
+
+/** Which Sign Flow firm (and so which DocuSeal) this line's agreements come from. */
+function SignflowAccountPicker() {
+  const { line, lines, reload } = useInboundLine();
+  const [firms, setFirms] = useState<FirmOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/inbound/signflow/firms')
+      .then(async (res) => {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; firms?: FirmOption[] };
+        if (!res.ok || !body.firms) setError(body.error ?? `HTTP ${res.status}`);
+        else setFirms(body.firms);
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'request failed'));
+  }, []);
+
+  if (!line) return null;
+  const firmId = line.signflow_firm_id ?? '';
+  const sharedWith = firmId ? lines.filter((l) => l.id !== line.id && l.signflow_firm_id === firmId).map((l) => l.name) : [];
+
+  const change = async (next: string) => {
+    setSaving(true);
+    setError(null);
+    const res = await fetch(`/api/inbound/lines/${line.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        line: {
+          name: line.name,
+          slug: line.slug,
+          phone_numbers: line.phone_numbers,
+          signflow_firm_id: next,
+          is_default: line.is_default,
+          active: line.active,
+        },
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) setError(body.error ?? `HTTP ${res.status}`);
+    await reload();
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="max-w-md space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700" htmlFor="signflow-firm">
+          Sign Flow account for {line.name}
+        </label>
+        <select
+          id="signflow-firm"
+          className={selectClass}
+          value={firmId}
+          disabled={saving || !firms}
+          onChange={(e) => void change(e.target.value)}
+        >
+          <option value="">{firms ? 'Not set (uses Sign Flow’s default firm)' : firmId || 'Loading accounts…'}</option>
+          {firms?.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}{f.docusealConfigured === false ? ' (DocuSeal not set up)' : ''}
+            </option>
+          ))}
+          {firms && firmId && !firms.some((f) => f.id === firmId) && <option value={firmId}>{firmId} (not found in Sign Flow)</option>}
+        </select>
+        <p className="text-xs text-slate-500">Agreements and the template list below come from this firm&apos;s DocuSeal in Sign Flow.</p>
+      </div>
+      {error && <WarningBox>Could not load or save Sign Flow accounts: {error}</WarningBox>}
+      {!firmId && !line.is_default && (
+        <WarningBox>
+          {line.name} isn&apos;t linked to a Sign Flow account, so the templates below are from Sign Flow&apos;s default firm, not
+          {` ${line.name}`}. Pick its account above.
+        </WarningBox>
+      )}
+      {sharedWith.length > 0 && (
+        <p className="text-xs text-amber-700">This account is also used by {sharedWith.join(', ')}.</p>
+      )}
+    </div>
+  );
+}
+
 export default function ContractsPage() {
   const { config, setConfig, loading, loadError, saving, message, save } = useInboundSettings();
   const { line } = useInboundLine();
@@ -130,10 +217,7 @@ export default function ContractsPage() {
 
           {c.provider === 'signflow' && (
             <div className="space-y-4">
-              <p className="text-sm text-slate-600">
-                Sign Flow account: <span className="font-medium">{line?.signflow_firm_id || 'default account'}</span>{' '}
-                <span className="text-xs text-slate-500">(set per line on the Intake Lines page)</span>
-              </p>
+              <SignflowAccountPicker />
               {templatesError && <WarningBox>Could not list Sign Flow templates: {templatesError}. You can still type the template ID.</WarningBox>}
               <div className="grid grid-cols-2 gap-4">
                 {(['en', 'es'] as const).map((lang) => {

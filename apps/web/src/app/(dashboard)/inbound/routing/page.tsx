@@ -10,13 +10,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox, selectClass } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
-import { LinePicker } from '@/components/inbound/line-context';
+import { LinePicker, useInboundLine } from '@/components/inbound/line-context';
 import { VoicePicker } from '@/components/voice-picker';
 
 const DAY_LABELS: Record<Weekday, string> = { sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday' };
 const TIMEZONES = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles'];
 export default function RoutingAndHoursPage() {
   const { config, setConfig, loading, loadError, saving, message, save } = useInboundSettings();
+  const { lineId } = useInboundLine();
   const [holidayDate, setHolidayDate] = useState('');
   const [holidayName, setHolidayName] = useState('');
   const bh = config.business_hours;
@@ -51,6 +52,7 @@ export default function RoutingAndHoursPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <VoicePicker
+            key={lineId ?? 'default'}
             id="inbound-voice"
             value={r.voice}
             onChange={(voice) => setRouting({ voice })}

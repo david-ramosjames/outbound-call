@@ -1,28 +1,35 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Play, RefreshCw, Square } from 'lucide-react';
+import { Check, Loader2, Play, RefreshCw, Square } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface Voice {
   id: string;
   name: string;
   language: string | null;
   custom: boolean;
+  description: string | null;
+  gender: string | null;
 }
 
-const FALLBACK: Voice[] = ['ara', 'eve', 'leo', 'rex', 'sal'].map((id) => ({
-  id,
-  name: id[0]!.toUpperCase() + id.slice(1),
+const FALLBACK: Voice[] = [
+  ['ara', 'Warm and friendly.'],
+  ['eve', 'Energetic and upbeat.'],
+  ['leo', 'Authoritative and strong.'],
+  ['rex', 'Confident and clear.'],
+  ['sal', 'Smooth and balanced.'],
+].map(([id, description]) => ({
+  id: id!,
+  name: id![0]!.toUpperCase() + id!.slice(1),
   language: 'en',
   custom: false,
+  description: description!,
+  gender: null,
 }));
 
-const selectClass =
-  'flex h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-firm-accent';
-
-/** Voice dropdown backed by the live xAI voice list, with a play button to hear a sample. */
+/** Voice list backed by the live xAI catalog, with a play button on each voice. */
 export function VoicePicker({
-  id = 'voice',
   label = 'Voice',
   value,
   onChange,
@@ -39,11 +46,12 @@ export function VoicePicker({
   const [voices, setVoices] = useState<Voice[]>(FALLBACK);
   const [live, setLive] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [previewing, setPreviewing] = useState(false);
-  const [playing, setPlaying] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const cacheRef = useRef<Map<string, string>>(new Map());
+  const [initialValue] = useState(value);
 
   const load = async (refresh = false) => {
     setLoading(true);
@@ -67,21 +75,22 @@ export function VoicePicker({
 
   const stop = () => {
     audioRef.current?.pause();
-    setPlaying(false);
+    setPlaying(null);
   };
 
-  const preview = async () => {
-    if (playing) return stop();
+  const preview = async (voiceId: string) => {
+    if (playing === voiceId) return stop();
+    stop();
     setError(null);
-    const key = `${value}|${sampleText}`;
+    const key = `${voiceId}|${sampleText}`;
     let src = cacheRef.current.get(key);
     if (!src) {
-      setPreviewing(true);
+      setLoadingPreview(voiceId);
       try {
         const res = await fetch('/api/voices/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voice: value, text: sampleText }),
+          body: JSON.stringify({ voice: voiceId, text: sampleText }),
         });
         const data = (await res.json()) as { audio?: string; mime?: string; error?: string };
         if (!res.ok || !data.audio) throw new Error(data.error ?? 'Preview failed');
@@ -91,80 +100,101 @@ export function VoicePicker({
         setError(err instanceof Error ? err.message : 'Preview failed');
         return;
       } finally {
-        setPreviewing(false);
+        setLoadingPreview(null);
       }
     }
-    audioRef.current?.pause();
     const audio = new Audio(src);
     audioRef.current = audio;
-    audio.onended = () => setPlaying(false);
-    setPlaying(true);
-    await audio.play().catch(() => setPlaying(false));
+    audio.onended = () => setPlaying(null);
+    setPlaying(voiceId);
+    await audio.play().catch(() => setPlaying(null));
   };
 
-  const options = voices.some((v) => v.id === value)
+  const all = voices.some((v) => v.id === value)
     ? voices
-    : [{ id: value, name: `${value} (current)`, language: null, custom: false }, ...voices];
-  const custom = options.filter((v) => v.custom);
-  const builtIn = options.filter((v) => !v.custom);
+    : [{ id: value, name: value, language: null, custom: false, description: null, gender: null }, ...voices];
+  // The saved voice stays pinned at the top (selection changes don't reorder the list under the cursor).
+  const ordered = [...all].sort(
+    (a, b) =>
+      Number(b.id === initialValue) - Number(a.id === initialValue) ||
+      Number(b.custom) - Number(a.custom) ||
+      a.name.localeCompare(b.name),
+  );
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-        {label}
-      </label>
-      <div className="flex items-center gap-2 max-w-md">
-        <select
-          id={id}
-          className={selectClass}
-          value={value}
-          onChange={(e) => {
-            stop();
-            onChange(e.target.value);
-          }}
-        >
-          {custom.length > 0 && (
-            <optgroup label="Custom voices">
-              {custom.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label="Built-in voices">
-            {builtIn.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </optgroup>
-        </select>
-        <button
-          type="button"
-          onClick={preview}
-          disabled={previewing || !value}
-          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          title="Hear a sample"
-        >
-          {previewing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : playing ? (
-            <Square className="h-4 w-4" />
-          ) : (
-            <Play className="h-4 w-4" />
-          )}
-          {playing ? 'Stop' : 'Preview'}
-        </button>
+      <div className="flex items-center justify-between max-w-xl">
+        <span className="block text-sm font-medium text-slate-700">{label}</span>
         <button
           type="button"
           onClick={() => load(true)}
           disabled={loading}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50"
           title="Refresh voice list"
         >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
         </button>
+      </div>
+      <div role="radiogroup" aria-label={label} className="max-w-xl max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+        {ordered.map((v) => {
+          const selected = v.id === value;
+          const meta = [v.gender, v.description].filter(Boolean).join(', ');
+          return (
+            <div
+              key={v.id}
+              role="radio"
+              aria-checked={selected}
+              tabIndex={0}
+              onClick={() => onChange(v.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onChange(v.id);
+                }
+              }}
+              className={cn(
+                'flex items-center gap-3 px-3 py-2.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-firm-accent',
+                selected ? 'bg-navy-50' : 'hover:bg-slate-50',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                  selected ? 'border-navy-700 bg-navy-700 text-white' : 'border-slate-300',
+                )}
+              >
+                {selected && <Check className="h-3 w-3" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-900">
+                  {v.name}
+                  {v.custom && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Custom</span>}
+                </p>
+                {meta && <p className="text-xs text-slate-500 truncate">{meta}</p>}
+              </div>
+              {v.id === initialValue && <span className="text-xs text-slate-500">Current</span>}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void preview(v.id);
+                }}
+                disabled={loadingPreview !== null && loadingPreview !== v.id}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                title={playing === v.id ? 'Stop' : `Hear ${v.name}`}
+                aria-label={playing === v.id ? 'Stop' : `Hear ${v.name}`}
+              >
+                {loadingPreview === v.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : playing === v.id ? (
+                  <Square className="h-3 w-3 fill-current" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                )}
+              </button>
+            </div>
+          );
+        })}
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
       {!error && !live && !loading && (

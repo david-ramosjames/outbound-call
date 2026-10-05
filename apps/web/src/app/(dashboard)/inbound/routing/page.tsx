@@ -11,11 +11,10 @@ import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox, selectClass } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
 import { LinePicker } from '@/components/inbound/line-context';
+import { VoicePicker } from '@/components/voice-picker';
 
 const DAY_LABELS: Record<Weekday, string> = { sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday' };
 const TIMEZONES = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles'];
-const VOICES = ['ara', 'eve', 'rex', 'sal', 'leo'];
-
 export default function RoutingAndHoursPage() {
   const { config, setConfig, loading, loadError, saving, message, save } = useInboundSettings();
   const [holidayDate, setHolidayDate] = useState('');
@@ -41,9 +40,27 @@ export default function RoutingAndHoursPage() {
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <InboundPageHeader title="Routing & Hours" description="When the team is available, where transfers go, and what happens when the AI is off." />
+      <InboundPageHeader title="Voice, Routing & Hours" description="The AI's voice, when the team is available, where transfers go, and what happens when the AI is off." />
       <LinePicker />
       {loadError && <WarningBox>{loadError}</WarningBox>}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>AI Voice</CardTitle>
+          <CardDescription>The voice callers hear on this intake line. Press Preview to hear it before saving.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <VoicePicker
+            id="inbound-voice"
+            value={r.voice}
+            onChange={(voice) => setRouting({ voice })}
+            sampleText={`Thank you for calling ${config.firm_name}. My name is Ana, I'm the firm's AI intake assistant. How can I help you today?`}
+          />
+          <Button onClick={() => save('routing', r)} disabled={saving === 'routing'}>
+            <Save className="h-4 w-4 mr-1.5" /> {saving === 'routing' ? 'Saving...' : 'Save voice'}
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -185,12 +202,6 @@ export default function RoutingAndHoursPage() {
               value={r.max_call_seconds}
               onChange={(e) => setRouting({ max_call_seconds: parseInt(e.target.value) || 1800 })}
             />
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5" htmlFor="voice">Voice</label>
-              <select id="voice" className={selectClass} value={r.voice} onChange={(e) => setRouting({ voice: e.target.value })}>
-                {VOICES.map((v) => <option key={v} value={v}>{v[0]!.toUpperCase() + v.slice(1)}</option>)}
-              </select>
-            </div>
           </div>
         </CardContent>
       </Card>

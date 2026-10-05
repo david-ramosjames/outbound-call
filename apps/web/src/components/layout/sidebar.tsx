@@ -36,7 +36,7 @@ const inboundNavItems = [
   { label: 'Test Agent', href: '/inbound/test', icon: FlaskConical },
   { label: 'Qualification Rules', href: '/inbound/rules', icon: ListChecks },
   { label: 'Agent Instructions', href: '/inbound/instructions', icon: MessageSquareText },
-  { label: 'Routing & Hours', href: '/inbound/routing', icon: Clock },
+  { label: 'Voice, Routing & Hours', href: '/inbound/routing', icon: Clock },
   { label: 'Contracts', href: '/inbound/contracts', icon: FileSignature },
   { label: 'Settings', href: '/inbound/settings', icon: SlidersHorizontal },
   { label: 'Intake Lines', href: '/inbound/lines', icon: Network },

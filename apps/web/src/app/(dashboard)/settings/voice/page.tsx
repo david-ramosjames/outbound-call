@@ -9,6 +9,7 @@ import { Toggle } from '@/components/ui/toggle';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_VOICE_SETTINGS } from '@outbound-call/shared';
+import { VoicePicker } from '@/components/voice-picker';
 
 interface VoiceSettingsData {
   id?: string;
@@ -271,25 +272,14 @@ export default function VoiceSettingsPage() {
           <CardTitle>Voice</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-1.5">
-            <label htmlFor="voice" className="block text-sm font-medium text-slate-700">
-              Default Voice
-            </label>
-            <select
-              id="voice"
-              value={settings.default_voice}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, default_voice: e.target.value }))
-              }
-              className="flex h-10 w-full max-w-xs rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-firm-accent"
-            >
-              <option value="eve">Eve</option>
-              <option value="ara">Ara</option>
-              <option value="rex">Rex</option>
-              <option value="sal">Sal</option>
-              <option value="leo">Leo</option>
-            </select>
-          </div>
+          <VoicePicker
+            id="voice"
+            label="Default Voice (outbound calls)"
+            value={settings.default_voice}
+            onChange={(voice) => setSettings((s) => ({ ...s, default_voice: voice }))}
+            sampleText="Hi, this is an AI assistant calling on behalf of the law firm about your case. Do you have a quick minute?"
+            hint="Inbound intake lines pick their own voice under Inbound → Voice, Routing & Hours."
+          />
         </CardContent>
       </Card>
 

@@ -13,6 +13,7 @@ import {
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
+import { listXaiVoices, previewXaiVoice } from '../services/xai-voices.js';
 import { signflowFetch } from './contract-service.js';
 import { finalizeInboundCall } from './finalize.js';
 import { runSimulationTurn, simulateRequestSchema } from './simulate.js';
@@ -338,6 +339,30 @@ inboundRouter.get('/internal/inbound/signflow/templates/:id', async (req: Reques
   const firmId = String(req.query.firmId ?? '').trim();
   const r = await signflowFetch(`/api/intake/templates/${id}${firmId ? `?firmId=${encodeURIComponent(firmId)}` : ''}`);
   res.status(r.ok ? 200 : 502).json(r.ok ? r.body : { ok: false, error: r.error });
+});
+
+// ---------- xAI voices (shared by outbound and inbound settings) ----------
+
+inboundRouter.get('/internal/voices', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
+  res.json(await listXaiVoices(req.query.refresh === '1'));
+});
+
+inboundRouter.post('/internal/voices/preview', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
+  const voice = String(req.body?.voice ?? '').trim().toLowerCase();
+  const text = String(req.body?.text ?? '').trim().slice(0, 300);
+  if (!/^[a-z0-9_-]{2,40}$/.test(voice) || !text) {
+    res.status(400).json({ error: 'voice and text are required' });
+    return;
+  }
+  try {
+    const audio = await previewXaiVoice(voice, text);
+    res.json({ mime: 'audio/mpeg', audio: audio.toString('base64') });
+  } catch (err) {
+    logger.warn('Voice preview failed', { voice, error: err });
+    res.status(502).json({ error: err instanceof Error ? err.message : 'Preview failed' });
+  }
 });
 
 // ---------- Text Test Agent ----------

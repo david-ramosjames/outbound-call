@@ -186,6 +186,6 @@ export function normalizeXaiVoice(voice: string): string {
     verse: 'leo',
   };
   if (openaiToXai[v]) return openaiToXai[v];
-  const allowed = new Set(['eve', 'ara', 'rex', 'sal', 'leo']);
-  return allowed.has(v) ? v : 'eve';
+  // Any built-in or custom xAI voice id (they are short lowercase ids, e.g. "celeste" or "nlbqfwie").
+  return /^[a-z0-9_-]{2,40}$/.test(v) ? v : 'eve';
 }

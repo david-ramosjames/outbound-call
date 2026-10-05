@@ -130,7 +130,10 @@ function LineForm({
               placeholder="ramos-james"
             />
           )}
-          <p className="text-xs text-slate-500">Agreements, templates, and the contract text message come from this Sign Flow account.</p>
+          <p className="text-xs text-slate-500">
+            The firm in Sign Flow (Admin → Firms). Its DocuSeal and Quo connections send this line&apos;s agreements.
+            {!firms && ' The list loads once Sign Flow is connected on Setup & Environment; otherwise type the firm id, e.g. ramos-james or trucking-chicas.'}
+          </p>
         </div>
       </div>
       <div className="flex flex-wrap gap-8">

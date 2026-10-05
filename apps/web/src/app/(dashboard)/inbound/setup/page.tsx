@@ -48,10 +48,8 @@ const SIGNFLOW_VARS: EnvVar[] = [
   { key: 'DOCUSEAL_API_KEY', need: 'optional', purpose: 'Fallback DocuSeal key (secret). Usually set per account.' },
   { key: 'DOCUSEAL_WEBHOOK_SECRET', need: 'optional', purpose: 'Lets DocuSeal tell Sign Flow the moment a document is signed.' },
   { key: 'QUO_API_KEY', need: 'optional', purpose: 'Fallback Quo key for texting the signing link. Usually set per account.' },
-  { key: 'GMAIL_SERVICE_ACCOUNT_EMAIL', need: 'optional', purpose: 'Sends the signing link by email (or use SendGrid).' },
-  { key: 'SENDGRID_API_KEY', need: 'optional', purpose: 'Alternative email sender.' },
+  { key: 'GMAIL_SERVICE_ACCOUNT_EMAIL', need: 'optional', purpose: 'Needed only if callers can choose to get the agreement by email.' },
   { key: 'SIGNFLOW_EMAIL_PUBLIC_ORIGIN', need: 'optional', purpose: 'Public URL used in emailed links.' },
-  { key: 'CRON_SECRET', need: 'optional', purpose: 'Runs the reminder job for unsigned agreements.' },
 ];
 
 const NEED_LABEL: Record<Need, string> = {
@@ -233,7 +231,7 @@ export default function SetupPage() {
                 value={signflowUrl}
                 onChange={(e) => setSignflowUrl(e.target.value)}
                 placeholder="https://sign-flow.vercel.app"
-                hint="The Sign Flow deployment that sends agreements. Its token (SIGNFLOW_INTAKE_TOKEN) stays in the environment."
+                hint="The one Sign Flow app (not a DocuSeal URL). Each firm's own DocuSeal URL stays in Sign Flow → Admin → Firms. The token (SIGNFLOW_INTAKE_TOKEN) stays in the environment."
               />
             </div>
             <Button onClick={saveIntegrations} disabled={saving} className="mb-5">

@@ -186,9 +186,18 @@ const BASE_FIELDS: MissingField[] = [
   { key: 'incident_date', label: 'When it happened', hint: 'Date of the incident (approximate is fine)' },
   { key: 'incident_location', label: 'Where it happened', hint: 'City and state, road or business name' },
   { key: 'incident_description', label: 'What happened', hint: 'Brief description in their words' },
-  { key: 'injury_description', label: 'Injuries', hint: 'What injuries they have or what doctors said' },
+  {
+    key: 'injury_description',
+    label: 'Injuries',
+    hint: 'Where they are hurt or what hurts (e.g. neck and back pain). If they only say they were hurt, ask where it hurts',
+  },
   { key: 'medical_treatment', label: 'Medical treatment', hint: 'Whether they have seen a doctor, ER, or other provider' },
   { key: 'fault_summary', label: 'How it happened (fault facts)', hint: 'Facts about how it happened, e.g. stopped at a light and was hit from behind' },
+  {
+    key: 'caller_at_fault',
+    label: 'Who was at fault',
+    hint: "Record from the caller's own account: no if they clearly describe the other party causing it (rear-ended while stopped, other driver ran a red light or turned into them); yes/partial if they say they caused it or share blame. If it is unclear, ask one neutral follow-up (e.g. \"What was the other driver doing?\" or \"Did anyone say whose fault it was?\") before recording unknown. Never tell the caller who is at fault",
+  },
   { key: 'represented_by_attorney', label: 'Current attorney', hint: 'Whether they have already hired an attorney for this' },
 ];
 
@@ -247,7 +256,7 @@ function hasValue(facts: IntakeFacts, key: string): boolean {
     return Boolean(facts.case_specific?.[key.slice('case_specific.'.length)]);
   }
   if (key === 'injury_description') {
-    return Boolean(facts.injury_description || facts.injury_severity);
+    return Boolean(facts.injury_description || (facts.injury_severity && facts.injury_severity !== 'unknown'));
   }
   const v = (facts as Record<string, unknown>)[key];
   return v !== undefined && v !== null && v !== '';
@@ -329,7 +338,7 @@ export function currentIntakeStage(facts: IntakeFacts, now: Date): IntakeStage {
     return 'incident_details';
   }
   if (keys.has('injury_description') || keys.has('medical_treatment')) return 'injury_and_treatment';
-  if (keys.has('fault_summary')) return 'liability';
+  if (keys.has('fault_summary') || keys.has('caller_at_fault')) return 'liability';
   if (keys.has('represented_by_attorney')) return 'representation';
   if (report.missing.length > 0) return 'incident_details';
   return 'qualification';

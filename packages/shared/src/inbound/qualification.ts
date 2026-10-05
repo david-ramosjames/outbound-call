@@ -73,6 +73,42 @@ export function conditionMatches(cond: RuleCondition, facts: IntakeFacts, now: D
   }
 }
 
+const CONDITION_LABELS: Partial<Record<RuleField, string>> = {
+  case_type: 'case type',
+  incident_state: 'incident state',
+  incident_age_days: 'incident date',
+  injury_severity: 'injury severity',
+  injury_severity_rank: 'injury severity',
+  injury_reported: 'injuries',
+  medical_treatment: 'medical treatment',
+  caller_at_fault: 'who was at fault',
+  represented_by_attorney: 'current attorney',
+  police_report: 'police report',
+};
+
+function conditionLabel(field: RuleField): string {
+  return CONDITION_LABELS[field] ?? field.replace(/_/g, ' ');
+}
+
+/** When no rule matched: what the closest qualifying rule is still missing, so staff know what to ask. */
+function explainNoMatch(config: QualificationConfig, facts: IntakeFacts, now: Date): string[] {
+  const candidates = config.rules.filter((r) => r.enabled && r.result === 'qualified');
+  let best: { rule: QualificationRule; failing: RuleCondition[] } | null = null;
+  for (const rule of candidates) {
+    const failing = rule.conditions.filter((c) => !conditionMatches(c, facts, now));
+    if (!best || failing.length < best.failing.length) best = { rule, failing };
+  }
+  if (!best || best.failing.length === 0) return ['No qualification rule matched the facts collected so far'];
+
+  const unique = (xs: string[]) => [...new Set(xs)];
+  const unknown = unique(best.failing.filter((c) => !isSet(deriveRuleValue(c.field, facts, now))).map((c) => conditionLabel(c.field)));
+  const unmet = unique(best.failing.filter((c) => isSet(deriveRuleValue(c.field, facts, now))).map((c) => conditionLabel(c.field)));
+  const out: string[] = [];
+  if (unknown.length) out.push(`Not yet known: ${unknown.join(', ')} (needed for "${best.rule.name}")`);
+  if (unmet.length) out.push(`Does not meet "${best.rule.name}" on: ${unmet.join(', ')}`);
+  return out;
+}
+
 export function ruleMatches(rule: QualificationRule, facts: IntakeFacts, now: Date): boolean {
   return rule.enabled && rule.conditions.every((c) => conditionMatches(c, facts, now));
 }
@@ -118,7 +154,7 @@ export function evaluateQualification(
   }
 
   const reasons = deciding.map((r) => r.reason);
-  if (deciding.length === 0) reasons.push('No qualification rule matched the facts collected so far');
+  if (deciding.length === 0) reasons.push(...explainNoMatch(config, facts, now));
   if (result === 'qualified' || result === 'high_priority') {
     for (const r of qualified) if (!reasons.includes(r.reason)) reasons.push(r.reason);
   }

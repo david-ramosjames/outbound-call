@@ -127,7 +127,9 @@ describe('inbound intake: 20 seed scenarios', () => {
   it('2. weak auto accident (minor injury, no treatment) needs review and blocks the agreement', async () => {
     const s = setup();
     await strongAuto(s.tool);
-    await s.tool('update_intake', { facts: { injury_severity: 'minor', medical_treatment: false, injury_description: 'A little sore' } });
+    await s.tool('update_intake', {
+      facts: { injury_severity: 'minor', medical_treatment: false, injury_description: 'A little sore', incident_date: '2026-08-15' },
+    });
     expect(s.state.qualification?.result).toBe('needs_review');
     expect(s.state.qualification?.canSendContract).toBe(false);
     expect((await s.tool('send_engagement_agreement', { caller_consented: true })).ok).toBe(false);
@@ -197,12 +199,38 @@ describe('inbound intake: 20 seed scenarios', () => {
     expect(auditTypes(s.log)).toContain('QUALIFICATION_CHANGED');
   });
 
-  it('8. injury without medical treatment needs review', async () => {
+  it('8. injury without medical treatment needs review after two weeks', async () => {
+    const s = setup();
+    await strongAuto(s.tool);
+    await s.tool('update_intake', { facts: { medical_treatment: false, incident_date: '2026-08-15' } });
+    expect(s.state.qualification?.result).toBe('needs_review');
+    expect(s.state.qualification?.reasons.join(' ')).toMatch(/treatment/i);
+  });
+
+  it('8b. recent injury not treated yet (within 14 days) still qualifies', async () => {
     const s = setup();
     await strongAuto(s.tool);
     await s.tool('update_intake', { facts: { medical_treatment: false } });
+    expect(s.state.qualification?.result).toBe('qualified');
+    expect(s.state.qualification?.reasons.join(' ')).toMatch(/encourage medical care/i);
+  });
+
+  it('8c. fault: unclear needs review; not yet asked is reported as missing', async () => {
+    const s = setup();
+    await strongAuto(s.tool);
+    await s.tool('update_intake', { facts: { caller_at_fault: 'unknown' } });
     expect(s.state.qualification?.result).toBe('needs_review');
-    expect(s.state.qualification?.reasons.join(' ')).toMatch(/treatment/i);
+    expect(s.state.qualification?.reasons.join(' ')).toMatch(/fault is unclear/i);
+
+    const t = setup();
+    await t.tool('save_contact_information', { caller_name: 'David', use_caller_id_number: true });
+    const { caller_at_fault: _omit, injury_description: _i, injury_severity: _s, ...rest } = STRONG_AUTO;
+    await t.tool('update_intake', { facts: { ...rest, injury_severity: 'unknown', medical_treatment: false } });
+    await t.tool('evaluate_qualification');
+    const reasons = t.state.qualification?.reasons.join(' ') ?? '';
+    expect(reasons).toMatch(/Not yet known: .*injuries.*who was at fault/i);
+    const missing = getMissingFields(t.state.facts, BUSINESS_NOW).missing.map((m) => m.key);
+    expect(missing).toEqual(expect.arrayContaining(['injury_description', 'caller_at_fault']));
   });
 
   it('9. existing client: no qualification, routed to the existing-client line', async () => {

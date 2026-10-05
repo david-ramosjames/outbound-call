@@ -316,7 +316,18 @@ export async function writeAudit(
 
 // ---------- Transcript ----------
 
-export async function saveTranscript(callId: string, speaker: 'caller' | 'agent' | 'system', text: string, language: string): Promise<void> {
-  const { error } = await supabase.from('inbound_transcript_segments').insert({ call_id: callId, speaker, text, language });
+export async function saveTranscript(
+  callId: string,
+  speaker: 'caller' | 'agent' | 'system',
+  text: string,
+  language: string,
+): Promise<number | null> {
+  const { data, error } = await supabase.from('inbound_transcript_segments').insert({ call_id: callId, speaker, text, language }).select('id').single();
   if (error) logger.error('Failed to save inbound transcript', { inboundCallId: callId, errorMessage: error.message });
+  return (data?.id as number | undefined) ?? null;
+}
+
+export async function updateTranscript(segmentId: number, text: string): Promise<void> {
+  const { error } = await supabase.from('inbound_transcript_segments').update({ text }).eq('id', segmentId);
+  if (error) logger.error('Failed to update inbound transcript', { segmentId, errorMessage: error.message });
 }

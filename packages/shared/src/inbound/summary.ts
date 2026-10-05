@@ -72,7 +72,17 @@ export function formatIntakeSummary(state: InboundIntakeState): string {
   } else {
     out.push('Incident:', incident(f), '');
     out.push('Injuries:', injuries(f), '');
-    out.push('Liability:', lines(f.fault_summary, f.caller_at_fault && f.caller_at_fault !== 'no' && `Caller fault: ${f.caller_at_fault}.`) || 'Not collected.', '');
+    const faultLine =
+      f.caller_at_fault === 'no'
+        ? 'Other party at fault (per caller).'
+        : f.caller_at_fault === 'yes'
+          ? 'Caller says they were at fault.'
+          : f.caller_at_fault === 'partial'
+            ? 'Caller may share fault.'
+            : f.caller_at_fault === 'unknown'
+              ? 'Fault unclear.'
+              : 'Fault not determined.';
+    out.push('Liability:', lines(faultLine, f.fault_summary) || 'Not collected.', '');
     out.push(
       'Representation:',
       f.represented_by_attorney === true

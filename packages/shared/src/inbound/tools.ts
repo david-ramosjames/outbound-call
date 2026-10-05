@@ -88,7 +88,10 @@ const FACT_PROPERTIES: Record<string, Record<string, unknown>> = {
   represented_by_attorney: bool('Already has an attorney for this matter'),
   previous_attorney: str('Name of current/previous attorney'),
   fault_summary: str('Facts about how the incident happened (no judgments)'),
-  caller_at_fault: enumOf(['no', 'yes', 'partial', 'unknown'], 'Based only on facts the caller stated'),
+  caller_at_fault: enumOf(
+    ['no', 'yes', 'partial', 'unknown'],
+    "From the caller's own account only. no = they describe the other party causing it (e.g. rear-ended while stopped). If unclear, ask a follow-up first; unknown only if still unclear.",
+  ),
   property_damage: str('Property / vehicle damage'),
   work_missed: str('Time missed from work'),
   witnesses: str('Witnesses'),

@@ -124,6 +124,8 @@ export function buildInboundInstructions(ctx: InboundPromptContext): string {
 - Get their name and best callback number early (save_contact_information). The number they're calling from is available; you may ask "Is the number you're calling from the best one to reach you?" and set use_caller_id_number.
 - Read phone numbers back once in groups (e.g. "five one two, five five five, one two three four") to confirm.
 - If they don't know or don't want to share something, accept it gracefully, call record_declined_field, and move on. Never pressure.
+- Injuries: if they say they were hurt, ask where it hurts or what the injuries are, and record injury_description (and injury_severity if clear).
+- Fault: after they describe what happened, record caller_at_fault from their own account (e.g. rear-ended while stopped = no). If their story doesn't make it clear, ask one neutral follow-up such as "What was the other driver doing?" Never tell the caller who was at fault or whether they have a case.
 - Tool results include "next_step", "still_needed", and "guidance". Follow them.
 - If the situation sounds serious (a death, hospitalization, surgery, an 18-wheeler/commercial truck, a seriously hurt child, several people hurt), ${ins.escalation_instructions}
 - When the intake questions are covered, call evaluate_qualification and follow its next_step.`,

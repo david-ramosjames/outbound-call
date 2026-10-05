@@ -19,7 +19,7 @@ import { logger } from '../utils/logger.js';
 import { normalizeXaiVoice } from '../services/map-mission.js';
 import { finalizeInboundCall } from './finalize.js';
 import { createLiveRuntime } from './runtime.js';
-import { getInboundCall, loadIntakeForCall, loadLineSettings, saveTranscript, updateInboundCall, type InboundCallRow } from './store.js';
+import { getInboundCall, loadIntakeForCall, loadLineSettings, saveTranscript, updateInboundCall, updateTranscript, type InboundCallRow } from './store.js';
 import { hangUpCall } from './telephony.js';
 
 const activeSessions = new Map<string, InboundVoiceSession>();
@@ -38,6 +38,7 @@ export class InboundVoiceSession {
   private closing = false;
   private responseActive = false;
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastCaller: { segmentId: number | null; itemId: string | null; text: string } | null = null;
 
   constructor(
     private readonly callId: string,
@@ -169,7 +170,7 @@ export class InboundVoiceSession {
       }
       case 'conversation.item.input_audio_transcription.completed': {
         const text = String(event.transcript ?? '').trim();
-        if (text) await saveTranscript(this.callId, 'caller', text, this.state.language);
+        if (text) await this.recordCallerText(text, typeof event.item_id === 'string' ? event.item_id : null);
         break;
       }
       case 'response.function_call_arguments.done':
@@ -189,8 +190,31 @@ export class InboundVoiceSession {
     await this.recordAgentText(pending);
   }
 
+  /**
+   * The transcriber re-sends a caller turn as it grows ("I was" → "I was calling" → ...), sometimes
+   * repeating the final text. Keep one row per turn: update it while the text is the same turn.
+   */
+  private async recordCallerText(text: string, itemId: string | null): Promise<void> {
+    const last = this.lastCaller;
+    const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
+    const sameTurn =
+      last &&
+      ((itemId && last.itemId === itemId) || norm(text).startsWith(norm(last.text)) || norm(last.text).startsWith(norm(text)));
+    if (last && sameTurn) {
+      if (norm(text).length > norm(last.text).length && last.segmentId !== null) {
+        last.text = text;
+        await updateTranscript(last.segmentId, text);
+      }
+      if (itemId) last.itemId = itemId;
+      return;
+    }
+    const segmentId = await saveTranscript(this.callId, 'caller', text, this.state.language);
+    this.lastCaller = { segmentId, itemId, text };
+  }
+
   private async recordAgentText(text: string): Promise<void> {
     if (!text.trim()) return;
+    this.lastCaller = null;
     await saveTranscript(this.callId, 'agent', text, this.state.language);
     const violations = checkAgentUtterance(text);
     if (violations.length === 0) return;

@@ -271,6 +271,10 @@ export default function SetupPage() {
             <CopyRow label="A call comes in (POST)" value={worker.urls.voice} />
             <CopyRow label="Call status changes" value={worker.urls.status} />
             <CopyRow label="Sign Flow callback" value={worker.urls.signflowCallback} />
+            <p className="text-xs text-slate-500 pl-40">
+              For reference only: nothing to paste. The worker sends this URL to Sign Flow with each agreement, and Sign Flow reports the
+              signature status back to it.
+            </p>
             {!worker.urls.voice.startsWith('https://') && (
               <WarningBox>VOICE_WORKER_BASE_URL on the worker is not an https URL, so Twilio and Sign Flow cannot reach it.</WarningBox>
             )}

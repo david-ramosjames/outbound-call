@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
+import { LinePicker } from '@/components/inbound/line-context';
 
 const FLAGS: Array<{ key: keyof InboundFlags; label: string; description: string; risky?: boolean }> = [
   { key: 'inbound_enabled', label: 'Inbound intake enabled', description: 'Master switch. When off, calls to the intake number use fallback routing.', risky: true },
@@ -28,6 +29,7 @@ export default function InboundSettingsPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <InboundPageHeader title="Settings" description="Feature flags for the inbound intake agent. Risky capabilities are off by default." />
+      <LinePicker />
       {loadError && <WarningBox>{loadError}</WarningBox>}
 
       <Card>

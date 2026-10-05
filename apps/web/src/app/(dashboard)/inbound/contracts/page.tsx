@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Save } from 'lucide-react';
 import {
   CONTRACT_DELIVERY_METHODS,
@@ -15,16 +15,47 @@ import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox, selectClass } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
+import { LinePicker, useInboundLine } from '@/components/inbound/line-context';
 
 const ELIGIBLE: QualificationResultValue[] = ['high_priority', 'qualified'];
 const DELIVERY_LABELS: Record<ContractDeliveryMethod, string> = { sms: 'Text message', email: 'Email' };
 
 type Lang = 'en' | 'es';
 
+interface TemplateOption {
+  id: number;
+  name: string;
+  folder?: string | null;
+}
+
 export default function ContractsPage() {
   const { config, setConfig, loading, loadError, saving, message, save } = useInboundSettings();
+  const { line } = useInboundLine();
   const [importing, setImporting] = useState<Lang | null>(null);
   const [importMsg, setImportMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [templates, setTemplates] = useState<TemplateOption[] | null>(null);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const firmId = line?.signflow_firm_id ?? '';
+  const provider = config.contracts.provider;
+
+  useEffect(() => {
+    if (provider !== 'signflow') return;
+    let cancelled = false;
+    setTemplates(null);
+    setTemplatesError(null);
+    fetch(`/api/inbound/signflow/templates?firmId=${encodeURIComponent(firmId)}`)
+      .then(async (res) => {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; templates?: TemplateOption[] };
+        if (cancelled) return;
+        if (!res.ok || !body.templates) setTemplatesError(body.error ?? `HTTP ${res.status}`);
+        else setTemplates(body.templates);
+      })
+      .catch((e: unknown) => !cancelled && setTemplatesError(e instanceof Error ? e.message : 'request failed'));
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, firmId]);
+
   if (loading) return <LoadingSpinner />;
 
   const c = config.contracts;
@@ -41,7 +72,7 @@ export default function ContractsPage() {
     setImporting(lang);
     setImportMsg(null);
     try {
-      const res = await fetch(`/api/inbound/contracts/template-text?templateId=${id}`);
+      const res = await fetch(`/api/inbound/contracts/template-text?templateId=${id}&firmId=${encodeURIComponent(firmId)}`);
       const body = (await res.json()) as { error?: string; name?: string; text?: string; truncated?: boolean };
       if (!res.ok || !body.text) throw new Error(body.error ?? 'Import failed');
       set(lang === 'es' ? { knowledge_es: body.text } : { knowledge_en: body.text });
@@ -62,6 +93,7 @@ export default function ContractsPage() {
         title="Contracts"
         description="Whether the AI may send an engagement agreement during the call, how it is delivered, and what the AI knows about it."
       />
+      <LinePicker hint="Each line can send a different agreement from its own Sign Flow account." />
       {loadError && <WarningBox>{loadError}</WarningBox>}
 
       <Card className={config.flags.contracts_enabled ? 'border-amber-300' : ''}>
@@ -98,22 +130,44 @@ export default function ContractsPage() {
 
           {c.provider === 'signflow' && (
             <div className="space-y-4">
+              <p className="text-sm text-slate-600">
+                Sign Flow account: <span className="font-medium">{line?.signflow_firm_id || 'default account'}</span>{' '}
+                <span className="text-xs text-slate-500">(set per line on the Intake Lines page)</span>
+              </p>
+              {templatesError && <WarningBox>Could not list Sign Flow templates: {templatesError}. You can still type the template ID.</WarningBox>}
               <div className="grid grid-cols-2 gap-4">
-                <Input
-                  id="tpl-en"
-                  label="DocuSeal template ID (English)"
-                  inputMode="numeric"
-                  value={c.signflow_template_id_en ?? ''}
-                  onChange={(e) => set({ signflow_template_id_en: parseId(e.target.value) })}
-                />
-                <Input
-                  id="tpl-es"
-                  label="DocuSeal template ID (Spanish)"
-                  inputMode="numeric"
-                  value={c.signflow_template_id_es ?? ''}
-                  onChange={(e) => set({ signflow_template_id_es: parseId(e.target.value) })}
-                  hint="Optional. Spanish callers get the English template when blank."
-                />
+                {(['en', 'es'] as const).map((lang) => {
+                  const value = templateId(lang);
+                  const key = lang === 'en' ? 'signflow_template_id_en' : 'signflow_template_id_es';
+                  const label = lang === 'en' ? 'Agreement template (English)' : 'Agreement template (Spanish)';
+                  if (templates && (value === null || templates.some((t) => t.id === value))) {
+                    return (
+                      <div key={lang} className="space-y-1.5">
+                        <label className="text-sm font-medium text-slate-700">{label}</label>
+                        <select className={selectClass} value={value ?? ''} onChange={(e) => set({ [key]: parseId(e.target.value) })}>
+                          <option value="">{lang === 'es' ? 'Same as English' : 'Choose a template'}</option>
+                          {templates.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name || `Template ${t.id}`}
+                              {t.folder ? ` (${t.folder})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
+                  return (
+                    <Input
+                      key={lang}
+                      id={`tpl-${lang}`}
+                      label={`${label}: DocuSeal ID`}
+                      inputMode="numeric"
+                      value={value ?? ''}
+                      onChange={(e) => set({ [key]: parseId(e.target.value) })}
+                      hint={lang === 'es' ? 'Optional. Spanish callers get the English template when blank.' : undefined}
+                    />
+                  );
+                })}
               </div>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-slate-700">The caller may choose</p>
@@ -140,8 +194,9 @@ export default function ContractsPage() {
                 description="After sending, the AI helps the caller open, review, and sign, and confirms the signature with Sign Flow before saying it went through."
               />
               <p className="text-xs text-slate-500">
-                Sign Flow sends the text (from its Quo contract number) or email, runs its normal reminders if they don&apos;t finish, and
-                tells the voice worker when the agreement is opened or signed. The incident date is filled in as the date of loss.
+                Sign Flow sends the text (from its Quo contract number) or email from this line&apos;s account, runs its normal reminders if
+                they don&apos;t finish, and tells the voice worker when the agreement is opened or signed. The incident date is filled in as
+                the date of loss.
               </p>
             </div>
           )}

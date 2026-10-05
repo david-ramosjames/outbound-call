@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { Card } from '@/components/ui/card';
 import { InboundPageHeader } from '@/components/inbound/page-header';
 import { InboundCallStatusBadge, QualificationBadge } from '@/components/inbound/badges';
+import { loadLineNames } from '@/lib/inbound-line-names';
 import { formatDuration } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -19,14 +20,19 @@ interface CallRow {
   end_reason: string | null;
   started_at: string;
   duration_seconds: number | null;
+  line_id?: string | null;
   inbound_intakes: Array<{ caller_name: string | null; qualification_result: string | null; high_priority: boolean; case_type: string | null }>;
 }
 
 export default async function InboundCallsPage() {
   const supabase = await createClient();
+  const lineNames = await loadLineNames(supabase);
+  const showLine = Boolean(lineNames && Object.keys(lineNames).length > 1);
   const { data, error } = await supabase
     .from('inbound_calls')
-    .select('id, from_number, status, language, business_status, transfer_status, end_reason, started_at, duration_seconds, inbound_intakes(caller_name, qualification_result, high_priority, case_type)')
+    .select(
+      `id, from_number, status, language, business_status, transfer_status, end_reason, started_at, duration_seconds, inbound_intakes(caller_name, qualification_result, high_priority, case_type)${lineNames ? ', line_id' : ''}`,
+    )
     .eq('simulated', false)
     .order('started_at', { ascending: false })
     .limit(100);
@@ -48,6 +54,7 @@ export default async function InboundCallsPage() {
                 <tr className="border-b border-slate-100">
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Status</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Caller</th>
+                  {showLine && <th className="text-left px-6 py-3 font-medium text-slate-500">Line</th>}
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Qualification</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Office</th>
                   <th className="text-left px-6 py-3 font-medium text-slate-500">Transfer</th>
@@ -70,6 +77,7 @@ export default async function InboundCallsPage() {
                         </Link>
                         <p className="text-xs text-slate-500 font-mono">{c.from_number ?? '—'}</p>
                       </td>
+                      {showLine && <td className="px-6 py-3 text-slate-700">{(c.line_id && lineNames?.[c.line_id]) ?? '—'}</td>}
                       <td className="px-6 py-3">
                         <QualificationBadge result={intake?.qualification_result} />
                       </td>

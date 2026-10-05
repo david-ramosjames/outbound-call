@@ -17,6 +17,8 @@ import {
   Clock,
   FileSignature,
   SlidersHorizontal,
+  Network,
+  ServerCog,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -37,6 +39,8 @@ const inboundNavItems = [
   { label: 'Routing & Hours', href: '/inbound/routing', icon: Clock },
   { label: 'Contracts', href: '/inbound/contracts', icon: FileSignature },
   { label: 'Settings', href: '/inbound/settings', icon: SlidersHorizontal },
+  { label: 'Intake Lines', href: '/inbound/lines', icon: Network },
+  { label: 'Setup & Environment', href: '/inbound/setup', icon: ServerCog },
 ];
 
 interface DashboardSidebarProps {

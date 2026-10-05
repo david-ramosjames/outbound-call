@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { InboundPageHeader, LoadingSpinner, SaveMessage } from '@/components/inbound/page-header';
+import { LinePicker, useInboundLine } from '@/components/inbound/line-context';
 
 interface VersionRow {
   version: number;
@@ -70,6 +71,8 @@ const SECTIONS: Array<{ title: string; description: string; fields: Array<{ key:
 ];
 
 export default function AgentInstructionsPage() {
+  const { lineId: selectedLineId, linesAvailable, loading: linesLoading } = useInboundLine();
+  const lineId = linesAvailable ? selectedLineId : null;
   const [content, setContent] = useState<AgentInstructions>(() => resolveAgentInstructions({}));
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [note, setNote] = useState('');
@@ -78,17 +81,20 @@ export default function AgentInstructionsPage() {
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const load = useCallback(async () => {
+    if (linesLoading) return;
     const supabase = createClient();
-    const { data } = await supabase
+    let query = supabase
       .from('inbound_agent_instructions')
       .select('version, is_active, note, created_by_email, created_at, content')
       .order('version', { ascending: false })
       .limit(50);
+    if (lineId) query = query.eq('line_id', lineId);
+    const { data } = await query;
     const rows = (data ?? []) as VersionRow[];
     setVersions(rows);
     setContent(resolveAgentInstructions(rows.find((r) => r.is_active)?.content));
     setLoading(false);
-  }, []);
+  }, [lineId, linesLoading]);
 
   useEffect(() => {
     void load();
@@ -100,7 +106,7 @@ export default function AgentInstructionsPage() {
     const res = await fetch('/api/inbound/instructions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, note }),
+      body: JSON.stringify({ content, note, lineId }),
     });
     const body = await res.json().catch(() => ({}));
     setSaving(false);
@@ -118,20 +124,21 @@ export default function AgentInstructionsPage() {
     await fetch('/api/inbound/instructions/activate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ version, lineId }),
     });
     await load();
   };
 
-  if (loading) return <LoadingSpinner />;
+  if (loading || linesLoading) return <LoadingSpinner />;
   const set = (key: TextKey, value: string) => setContent((c) => ({ ...c, [key]: value }));
 
   return (
     <div className="space-y-6 max-w-4xl">
       <InboundPageHeader
         title="Agent Instructions"
-        description="Edit what the intake agent says. Every save creates a new version; you can roll back at any time."
+        description="Edit what the intake agent says on this line. Every save creates a new version; you can roll back at any time. {{firm_name}} is replaced with the line's name."
       />
+      <LinePicker hint="Each line has its own instructions and version history." />
 
       {SECTIONS.map((section) => (
         <Card key={section.title}>

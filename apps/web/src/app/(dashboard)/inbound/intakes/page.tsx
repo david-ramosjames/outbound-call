@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
 import { InboundPageHeader } from '@/components/inbound/page-header';
 import { IntakesTable, type IntakeRow } from '@/components/inbound/intakes-table';
+import { loadLineNames } from '@/lib/inbound-line-names';
 import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -24,10 +25,13 @@ export default async function InboundIntakesPage({ searchParams }: { searchParam
   const { filter = 'all', q } = await searchParams;
   const search = (q ?? '').replace(/[,()%*\\]/g, ' ').trim();
   const supabase = await createClient();
+  const lineNames = await loadLineNames(supabase);
 
   let query = supabase
     .from('inbound_intakes')
-    .select('id, call_id, status, caller_name, phone, language, case_type, qualification_result, high_priority, contract_status, created_at')
+    .select(
+      `id, call_id, status, caller_name, phone, language, case_type, qualification_result, high_priority, contract_status, created_at${lineNames ? ', line_id' : ''}`,
+    )
     .order('created_at', { ascending: false })
     .limit(200);
 
@@ -99,7 +103,7 @@ export default async function InboundIntakesPage({ searchParams }: { searchParam
         {error ? (
           <p className="px-6 py-8 text-sm text-red-600">Could not load intakes: {error.message}</p>
         ) : (
-          <IntakesTable rows={(data ?? []) as IntakeRow[]} />
+          <IntakesTable rows={(data ?? []) as unknown as IntakeRow[]} lineNames={lineNames} />
         )}
       </Card>
     </div>

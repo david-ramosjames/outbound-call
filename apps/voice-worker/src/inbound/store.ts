@@ -1,39 +1,122 @@
 import {
   emptyContractState,
   newIntakeState,
+  normalizeE164,
   resolveAgentInstructions,
   resolveInboundConfig,
+  resolveInboundIntegrations,
   type AgentInstructions,
   type AuditEventInput,
   type InboundConfig,
   type InboundIntakeState,
+  type InboundIntegrations,
+  type InboundLineRow,
 } from '@outbound-call/shared';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
 
-// ---------- Settings ----------
+// ---------- Intake lines and settings ----------
 
-let cache: { at: number; value: { config: InboundConfig; instructions: AgentInstructions; instructionsVersion: number | null } } | null = null;
+export interface LineSettings {
+  line: InboundLineRow;
+  config: InboundConfig;
+  instructions: AgentInstructions;
+  instructionsVersion: number | null;
+}
+
+type LineDbRow = InboundLineRow & Record<string, unknown>;
+
 const CACHE_MS = 10_000;
+let linesCache: { at: number; rows: LineDbRow[] | null } | null = null;
+const settingsCache = new Map<string, { at: number; value: LineSettings }>();
 
-export async function loadInboundSettings(force = false) {
-  if (!force && cache && Date.now() - cache.at < CACHE_MS) return cache.value;
+const NO_LINE: InboundLineRow = { id: '', name: '', slug: '', phone_numbers: [], signflow_firm_id: '', is_default: true, active: true };
 
-  const [{ data: settings, error: settingsError }, { data: active }] = await Promise.all([
-    supabase.from('inbound_settings').select('*').eq('id', 1).maybeSingle(),
-    supabase.from('inbound_agent_instructions').select('version, content').eq('is_active', true).maybeSingle(),
-  ]);
-  if (settingsError) {
-    // Table missing (migration not run) resolves to all-defaults, i.e. inbound disabled.
-    logger.warn('Inbound settings unavailable; using defaults', { errorMessage: settingsError.message });
-  }
+/** Active lines, or null when the lines table doesn't exist yet (pre-010 database). */
+async function loadLines(force = false): Promise<LineDbRow[] | null> {
+  if (!force && linesCache && Date.now() - linesCache.at < CACHE_MS) return linesCache.rows;
+  const { data, error } = await supabase.from('inbound_lines').select('*').eq('active', true);
+  if (error) logger.warn('Inbound lines unavailable; using legacy single settings row', { errorMessage: error.message });
+  const rows = error ? null : ((data ?? []) as LineDbRow[]);
+  linesCache = { at: Date.now(), rows };
+  return rows;
+}
 
-  const value = {
-    config: resolveInboundConfig(settings),
-    instructions: resolveAgentInstructions(active?.content),
+async function buildLineSettings(row: LineDbRow): Promise<LineSettings> {
+  const { data: active } = await supabase
+    .from('inbound_agent_instructions')
+    .select('version, content')
+    .eq('line_id', row.id)
+    .eq('is_active', true)
+    .maybeSingle();
+  const config = resolveInboundConfig(row);
+  return {
+    line: {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      phone_numbers: row.phone_numbers ?? [],
+      signflow_firm_id: row.signflow_firm_id ?? '',
+      is_default: row.is_default,
+      active: row.active,
+    },
+    config,
+    instructions: resolveAgentInstructions(active?.content, config.firm_name),
     instructionsVersion: (active?.version as number | undefined) ?? null,
   };
-  cache = { at: Date.now(), value };
+}
+
+async function legacySettings(): Promise<LineSettings> {
+  const [{ data: settings, error }, { data: active }] = await Promise.all([
+    supabase.from('inbound_settings').select('*').eq('id', 1).maybeSingle(),
+    supabase.from('inbound_agent_instructions').select('version, content').eq('is_active', true).limit(1).maybeSingle(),
+  ]);
+  if (error) logger.warn('Inbound settings unavailable; using defaults', { errorMessage: error.message });
+  const config = resolveInboundConfig(settings);
+  return {
+    line: NO_LINE,
+    config,
+    instructions: resolveAgentInstructions(active?.content, config.firm_name),
+    instructionsVersion: (active?.version as number | undefined) ?? null,
+  };
+}
+
+/** Settings for a line (falls back to the default line, then to built-in defaults with inbound off). */
+export async function loadLineSettings(lineId: string | null | undefined, force = false): Promise<LineSettings> {
+  const key = lineId || 'default';
+  const hit = settingsCache.get(key);
+  if (!force && hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+
+  const rows = await loadLines(force);
+  let value: LineSettings;
+  if (rows === null) value = await legacySettings();
+  else {
+    const row = rows.find((r) => r.id === lineId) ?? rows.find((r) => r.is_default);
+    value = row ? await buildLineSettings(row) : { line: NO_LINE, config: resolveInboundConfig({}), instructions: resolveAgentInstructions({}), instructionsVersion: null };
+  }
+  settingsCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** Pick the line for a dialed number; unknown numbers go to the default line. */
+export async function resolveLineForNumber(dialed: string | null, force = false): Promise<LineSettings> {
+  const rows = await loadLines(force);
+  const n = dialed ? normalizeE164(dialed) : null;
+  const match = n && rows ? rows.find((r) => (r.phone_numbers ?? []).some((p) => normalizeE164(p) === n)) : undefined;
+  return loadLineSettings(match?.id ?? null, force);
+}
+
+export async function listActiveLines(): Promise<InboundLineRow[]> {
+  return (await loadLines(true)) ?? [];
+}
+
+let integrationsCache: { at: number; value: InboundIntegrations } | null = null;
+
+export async function loadIntegrations(force = false): Promise<InboundIntegrations> {
+  if (!force && integrationsCache && Date.now() - integrationsCache.at < CACHE_MS) return integrationsCache.value;
+  const { data } = await supabase.from('inbound_settings').select('integrations').eq('id', 1).maybeSingle();
+  const value = resolveInboundIntegrations((data as { integrations?: unknown } | null)?.integrations);
+  integrationsCache = { at: Date.now(), value };
   return value;
 }
 
@@ -51,6 +134,7 @@ export interface InboundCallRow {
   started_at: string;
   answered_at: string | null;
   ended_at: string | null;
+  line_id?: string | null;
 }
 
 export async function getInboundCall(callId: string): Promise<InboundCallRow | null> {
@@ -74,8 +158,10 @@ export async function createInboundCallWithIntake(input: {
   to: string | null;
   forwardedFrom: string | null;
   businessStatus: string;
+  lineId: string;
   simulated?: boolean;
 }): Promise<{ callId: string; intakeId: string } | null> {
+  const lineCol = input.lineId ? { line_id: input.lineId } : {};
   const { data: call, error } = await supabase
     .from('inbound_calls')
     .insert({
@@ -86,6 +172,7 @@ export async function createInboundCallWithIntake(input: {
       business_status: input.businessStatus,
       simulated: input.simulated ?? false,
       status: 'ringing',
+      ...lineCol,
     })
     .select('id')
     .single();
@@ -97,7 +184,7 @@ export async function createInboundCallWithIntake(input: {
   const state = newIntakeState({ intakeId: 'pending', callId: call.id, callerIdNumber: input.from });
   const { data: intake, error: intakeError } = await supabase
     .from('inbound_intakes')
-    .insert({ call_id: call.id, status: 'active', phone: null, state })
+    .insert({ call_id: call.id, status: 'active', phone: null, state, ...lineCol })
     .select('id')
     .single();
   if (intakeError || !intake) {

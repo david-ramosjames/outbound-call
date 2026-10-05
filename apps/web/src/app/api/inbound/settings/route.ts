@@ -17,12 +17,13 @@ const SECTION_SCHEMAS = {
 } as const;
 type Section = keyof typeof SECTION_SCHEMAS;
 
+/** Save one settings section for an intake line (lineId), or the legacy single row when lineId is null. */
 export async function PUT(request: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const { supabase, userId, email } = auth;
 
-  const body = (await request.json()) as { section?: string; value?: unknown };
+  const body = (await request.json()) as { section?: string; value?: unknown; lineId?: string | null };
   if (!body.section || !(body.section in SECTION_SCHEMAS)) {
     return NextResponse.json({ error: 'Unknown settings section' }, { status: 400 });
   }
@@ -32,18 +33,21 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Validation failed', details: parsed.error.issues }, { status: 400 });
   }
 
-  const { data: before } = await supabase.from('inbound_settings').select(section).eq('id', 1).maybeSingle();
+  const table = body.lineId ? 'inbound_lines' : 'inbound_settings';
+  const key = body.lineId ? { col: 'id', val: body.lineId } : { col: 'id', val: 1 };
+
+  const { data: before } = await supabase.from(table).select(section).eq(key.col, key.val).maybeSingle();
   const { data: updated, error } = await supabase
-    .from('inbound_settings')
+    .from(table)
     .update({ [section]: parsed.data, updated_by: userId, updated_at: new Date().toISOString() })
-    .eq('id', 1)
+    .eq(key.col, key.val)
     .select('id');
   if (error) {
     return NextResponse.json({ error: `Failed to save: ${error.message}` }, { status: 500 });
   }
   if (!updated || updated.length === 0) {
     return NextResponse.json(
-      { error: 'Failed to save: settings row not found or your account lacks an active role. Re-run the inbound migration and check case_tracker_user_roles.' },
+      { error: 'Failed to save: settings row not found or your account is not an admin. Re-run the inbound migrations and check case_tracker_user_roles.' },
       { status: 403 },
     );
   }
@@ -52,7 +56,13 @@ export async function PUT(request: NextRequest) {
     type: 'SETTINGS_CHANGED',
     actor: 'ADMIN',
     userId,
-    data: { section, by: email, before: (before as Record<string, unknown> | null)?.[section] ?? null, after: parsed.data },
+    data: {
+      section,
+      line_id: body.lineId ?? null,
+      by: email,
+      before: (before as Record<string, unknown> | null)?.[section] ?? null,
+      after: parsed.data,
+    },
   });
 
   return NextResponse.json({ ok: true, value: parsed.data });

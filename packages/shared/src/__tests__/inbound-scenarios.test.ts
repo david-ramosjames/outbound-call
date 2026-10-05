@@ -12,6 +12,8 @@ import {
   getMissingFields,
   inboundConfigSchema,
   newIntakeState,
+  normalizeE164,
+  resolveAgentInstructions,
   resolveInboundConfig,
   type InboundConfig,
   type InboundIntakeState,
@@ -454,6 +456,29 @@ describe('inbound intake: Sign Flow agreement on the call', () => {
     expect(prompt).toContain('Contingency fee: 33 1/3%');
     expect(prompt).toContain('you owe no attorney fee');
     expect(prompt).toContain('check_agreement_status');
+  });
+});
+
+describe('inbound intake: multiple intake lines', () => {
+  it('each line speaks with its own firm name', async () => {
+    const config = resolveInboundConfig({ name: 'Trucking Chicas', flags: { sms_enabled: true } });
+    expect(config.firm_name).toBe('Trucking Chicas');
+    const ins = resolveAgentInstructions({}, config.firm_name);
+    expect(ins.greeting_en).toContain('Thank you for calling Trucking Chicas');
+    expect(ins.greeting_es).toContain('Gracias por llamar a Trucking Chicas');
+    expect(JSON.stringify(ins)).not.toContain('{{firm_name}}');
+
+    const { runtime, log } = createMemoryRuntime({ config, now: BUSINESS_NOW });
+    const state = newIntakeState({ intakeId: 'i', callId: 'c', callerIdNumber: '(512) 555-1234' });
+    expect(buildInboundGreeting({ instructions: runtime.instructions, state })).toContain('Trucking Chicas');
+    await executeInboundTool('send_sms', { template: 'office_contact_info' }, state, runtime);
+    expect(log.sms[0]?.body.startsWith('Trucking Chicas:')).toBe(true);
+  });
+
+  it('normalizes intake numbers for routing', () => {
+    expect(normalizeE164('(737) 232-3927')).toBe('+17372323927');
+    expect(normalizeE164('+1 737 232 3927')).toBe('+17372323927');
+    expect(normalizeE164('12345')).toBeNull();
   });
 });
 

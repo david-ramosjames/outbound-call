@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, selectClass } from '@/components/inbound/page-header';
 import { QualificationBadge } from '@/components/inbound/badges';
+import { LinePicker, useInboundLine } from '@/components/inbound/line-context';
 import { cn } from '@/lib/utils';
 
 interface ChatMessage {
@@ -90,6 +91,7 @@ function YesNo({ ok, label, reason }: { ok: boolean; label: string; reason?: str
 }
 
 export default function TestAgentPage() {
+  const { lineId, linesAvailable } = useInboundLine();
   const [overrides, setOverrides] = useState<Overrides>({
     language: 'en',
     businessStatus: '',
@@ -121,6 +123,7 @@ export default function TestAgentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          lineId: linesAvailable ? lineId : null,
           messages: fresh ? [] : messages,
           userMessage,
           state: fresh ? null : state,
@@ -177,6 +180,7 @@ export default function TestAgentPage() {
         title="Test Agent"
         description="Play the caller by text. Uses the live instructions and rules; nothing is saved, transferred, or texted for real."
       />
+      <LinePicker hint="The test uses this line's instructions, rules, and settings. Restart after switching." />
 
       <Card>
         <CardContent className="pt-4 grid gap-4 sm:grid-cols-3 lg:grid-cols-6 items-end">

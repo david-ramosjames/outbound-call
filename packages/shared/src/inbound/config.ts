@@ -62,7 +62,7 @@ export const routingSchema = z.object({
   disabled_message: z
     .string()
     .default(
-      'Thank you for calling Ramos James Law. Please hold while we connect you, or call back during business hours.',
+      'Thank you for calling {{firm_name}}. Please hold while we connect you, or call back during business hours.',
     ),
   record_calls: z.boolean().default(false),
   sms_from_number: z.string().default(''),
@@ -103,7 +103,7 @@ export const contractsSchema = z.object({
   sms_message_template: z
     .string()
     .default(
-      'Ramos James Law: here is our engagement agreement to review and sign: {{link}} . Reply or call us with any questions.',
+      '{{firm_name}}: here is our engagement agreement to review and sign: {{link}} . Reply or call us with any questions.',
     ),
   /** webhook provider: POST intake JSON here; expect { external_id, signing_url }. */
   webhook_url: z.string().default(''),
@@ -389,6 +389,8 @@ export type QualificationConfig = z.infer<typeof qualificationConfigSchema>;
 // ---------- Whole inbound configuration ----------
 
 export const inboundConfigSchema = z.object({
+  /** The intake line's display name; fills {{firm_name}} in greetings and messages. */
+  firm_name: z.string().default('our firm'),
   flags: inboundFlagsSchema.default({}),
   business_hours: businessHoursSchema.default({}),
   routing: routingSchema.default({}),
@@ -397,10 +399,12 @@ export const inboundConfigSchema = z.object({
 });
 export type InboundConfig = z.infer<typeof inboundConfigSchema>;
 
-/** Build a full config from a (possibly partial / older) stored settings row. */
+/** Build a full config from a (possibly partial / older) stored line or settings row. */
 export function resolveInboundConfig(row: unknown): InboundConfig {
   const source = (row ?? {}) as Record<string, unknown>;
+  const name = typeof source.firm_name === 'string' ? source.firm_name : typeof source.name === 'string' ? source.name : undefined;
   const parsed = inboundConfigSchema.safeParse({
+    firm_name: name?.trim() || undefined,
     flags: source.flags ?? undefined,
     business_hours: source.business_hours ?? undefined,
     routing: source.routing ?? undefined,
@@ -416,17 +420,17 @@ export const agentInstructionsSchema = z.object({
   agent_identity: z
     .string()
     .default(
-      'You are the intake specialist for Ramos James Law, a personal injury law firm in Texas. You are an AI assistant, not an attorney.',
+      'You are the intake specialist for {{firm_name}}, a personal injury law firm. You are an AI assistant, not an attorney.',
     ),
   greeting_en: z
     .string()
     .default(
-      "Thank you for calling Ramos James Law. My name is Ana, I'm the firm's AI intake assistant. How can I help you today?",
+      "Thank you for calling {{firm_name}}. My name is Ana, I'm the firm's AI intake assistant. How can I help you today?",
     ),
   greeting_es: z
     .string()
     .default(
-      'Gracias por llamar a Ramos James Law. Me llamo Ana, soy la asistente de admisión virtual de la firma. ¿En qué le puedo ayudar hoy?',
+      'Gracias por llamar a {{firm_name}}. Me llamo Ana, soy la asistente de admisión virtual de la firma. ¿En qué le puedo ayudar hoy?',
     ),
   tone: z
     .string()
@@ -492,7 +496,67 @@ export const agentInstructionsSchema = z.object({
 });
 export type AgentInstructions = z.infer<typeof agentInstructionsSchema>;
 
-export function resolveAgentInstructions(content: unknown): AgentInstructions {
+/** Replace {{firm_name}} in a configurable message. */
+export function withFirmName(text: string, firmName: string): string {
+  return text.replace(/\{\{firm_name\}\}/g, firmName);
+}
+
+/** Resolve stored instructions; when firmName is given, {{firm_name}} is filled in everywhere. */
+export function resolveAgentInstructions(content: unknown, firmName?: string): AgentInstructions {
   const parsed = agentInstructionsSchema.safeParse(content ?? {});
-  return parsed.success ? parsed.data : agentInstructionsSchema.parse({});
+  const ins = parsed.success ? parsed.data : agentInstructionsSchema.parse({});
+  if (!firmName) return ins;
+  return {
+    ...(Object.fromEntries(
+      Object.entries(ins).map(([k, v]) => [k, typeof v === 'string' ? withFirmName(v, firmName) : v]),
+    ) as AgentInstructions),
+    case_type_instructions: Object.fromEntries(
+      Object.entries(ins.case_type_instructions).map(([k, v]) => [k, withFirmName(v, firmName)]),
+    ),
+  };
+}
+
+// ---------- Intake lines (one per firm / brand) ----------
+
+/** Normalize a US/E.164 phone number to +1XXXXXXXXXX (or +<digits>); null when it isn't one. */
+export function normalizeE164(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (raw.trim().startsWith('+') && digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+  return null;
+}
+
+export const inboundLineMetaSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  slug: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'lowercase letters, numbers and dashes'),
+  phone_numbers: z.array(z.string()).max(20).default([]),
+  signflow_firm_id: z.string().trim().max(100).default(''),
+  is_default: z.boolean().default(false),
+  active: z.boolean().default(true),
+});
+export type InboundLineMeta = z.infer<typeof inboundLineMetaSchema>;
+
+export interface InboundLineRow extends InboundLineMeta {
+  id: string;
+}
+
+// ---------- Global integrations (non-secret; secrets stay in env) ----------
+
+export const inboundIntegrationsSchema = z.object({
+  /** Sign Flow deployment, e.g. https://sign-flow.vercel.app */
+  signflow_base_url: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^https?:\/\/\S+$/.test(v), 'must start with https://')
+    .default(''),
+});
+export type InboundIntegrations = z.infer<typeof inboundIntegrationsSchema>;
+
+export function resolveInboundIntegrations(raw: unknown): InboundIntegrations {
+  const parsed = inboundIntegrationsSchema.safeParse(raw ?? {});
+  return parsed.success ? parsed.data : inboundIntegrationsSchema.parse({});
 }

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Request } from 'express';
 import Twilio from 'twilio';
-import type { TransferTarget } from '@outbound-call/shared';
+import { withFirmName, type InboundConfig, type TransferTarget } from '@outbound-call/shared';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 
@@ -54,12 +54,14 @@ export function sipBridgeTwiml(inboundCallId: string, resume = false): string {
 }
 
 /** What callers get when the AI is off or unavailable: forward to the office line, or a message. */
-export function fallbackTwiml(routing: { disabled_behavior: string; primary_transfer_number: string; disabled_message: string }): string {
+export function fallbackTwiml(inbound: Pick<InboundConfig, 'routing' | 'firm_name'>): string {
+  const { routing } = inbound;
+  const message = escapeXml(withFirmName(routing.disabled_message, inbound.firm_name));
   const primary = routing.primary_transfer_number.trim();
   if (routing.disabled_behavior === 'forward_to_primary' && primary) {
-    return twiml(`  <Dial timeout="30">\n    <Number>${escapeXml(primary)}</Number>\n  </Dial>\n  <Say>${escapeXml(routing.disabled_message)}</Say>`);
+    return twiml(`  <Dial timeout="30">\n    <Number>${escapeXml(primary)}</Number>\n  </Dial>\n  <Say>${message}</Say>`);
   }
-  return twiml(`  <Say>${escapeXml(routing.disabled_message)}</Say>`);
+  return twiml(`  <Say>${message}</Say>`);
 }
 
 export function transferDialTwiml(input: {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { requireAdmin } from '@/lib/inbound-admin';
+import { workerFetch } from '@/lib/voice-worker';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,18 +17,8 @@ export async function GET(request: Request) {
   if (!Number.isInteger(templateId) || templateId <= 0) {
     return NextResponse.json({ error: 'Enter a valid template ID' }, { status: 400 });
   }
-  const base = process.env.SIGNFLOW_BASE_URL?.trim().replace(/\/$/, '');
-  const token = process.env.SIGNFLOW_INTAKE_TOKEN?.trim();
-  if (!base || !token) {
-    return NextResponse.json({ error: 'SIGNFLOW_BASE_URL and SIGNFLOW_INTAKE_TOKEN are not set on the web app' }, { status: 503 });
-  }
-
-  const res = await fetch(`${base}/api/intake/templates/${templateId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-    signal: AbortSignal.timeout(20_000),
-  }).catch((e: unknown) => e as Error);
-  if (res instanceof Error) return NextResponse.json({ error: `Sign Flow unreachable: ${res.message}` }, { status: 502 });
+  const firmId = new URL(request.url).searchParams.get('firmId')?.trim() ?? '';
+  const res = await workerFetch(`/internal/inbound/signflow/templates/${templateId}${firmId ? `?firmId=${encodeURIComponent(firmId)}` : ''}`);
   const body = (await res.json().catch(() => ({}))) as { error?: string; name?: string; documents?: Array<{ filename: string; url: string }> };
   if (!res.ok) return NextResponse.json({ error: body.error ?? `Sign Flow responded ${res.status}` }, { status: 502 });
 

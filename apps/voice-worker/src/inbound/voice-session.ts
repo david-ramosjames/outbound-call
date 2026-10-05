@@ -19,7 +19,7 @@ import { logger } from '../utils/logger.js';
 import { normalizeXaiVoice } from '../services/map-mission.js';
 import { finalizeInboundCall } from './finalize.js';
 import { createLiveRuntime } from './runtime.js';
-import { getInboundCall, loadInboundSettings, loadIntakeForCall, saveTranscript, updateInboundCall, type InboundCallRow } from './store.js';
+import { getInboundCall, loadIntakeForCall, loadLineSettings, saveTranscript, updateInboundCall, type InboundCallRow } from './store.js';
 import { hangUpCall } from './telephony.js';
 
 const activeSessions = new Map<string, InboundVoiceSession>();
@@ -50,19 +50,22 @@ export class InboundVoiceSession {
   }
 
   async start(): Promise<void> {
-    const [settings, call, state] = await Promise.all([
-      loadInboundSettings(true),
-      getInboundCall(this.callId),
-      loadIntakeForCall(this.callId),
-    ]);
+    const [call, state] = await Promise.all([getInboundCall(this.callId), loadIntakeForCall(this.callId)]);
     if (!call || !state) {
       logger.error('Inbound session: call or intake missing', this.logCtx);
       return;
     }
+    const settings = await loadLineSettings(call.line_id, true);
     this.call = call;
     this.state = state;
     this.state.transferInProgress = false;
-    this.runtime = createLiveRuntime({ config: settings.config, instructions: settings.instructions, call, state });
+    this.runtime = createLiveRuntime({
+      config: settings.config,
+      instructions: settings.instructions,
+      call,
+      state,
+      signflowFirmId: settings.line.signflow_firm_id,
+    });
     activeSessions.set(this.callId, this);
 
     await updateInboundCall(this.callId, {

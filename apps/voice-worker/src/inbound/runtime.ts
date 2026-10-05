@@ -9,6 +9,7 @@ export function createLiveRuntime(input: {
   instructions: AgentInstructions;
   call: InboundCallRow;
   state: InboundIntakeState;
+  signflowFirmId?: string;
 }): InboundRuntime {
   const { config, instructions, call, state } = input;
   const smsFrom = config.routing.sms_from_number.trim() || call.to_number || '';
@@ -35,7 +36,7 @@ export function createLiveRuntime(input: {
       },
       sendSms: (to, body) => sendSms(smsFrom, to, body),
     },
-    contracts: createContractService(config, smsFrom),
+    contracts: createContractService(config, smsFrom, { signflowFirmId: input.signflowFirmId }),
     async persist(s) {
       await saveIntakeState(s);
       callbacksSaved = await insertCallbackRequests(s, callbacksSaved);

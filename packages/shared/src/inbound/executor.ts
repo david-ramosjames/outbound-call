@@ -580,8 +580,8 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
       const b = businessStatusFor(runtime);
       const body =
         args.template === 'office_contact_info'
-          ? 'Ramos James Law: thank you for calling. You can reach our office at this number during business hours.'
-          : `Ramos James Law: we received your message and someone from our team will call you back${b.status === 'business_hours' ? ' soon' : b.nextOpenPhrase ? ` ${b.nextOpenPhrase}` : ''}.`;
+          ? `${config.firm_name}: thank you for calling. You can reach our office at this number during business hours.`
+          : `${config.firm_name}: we received your message and someone from our team will call you back${b.status === 'business_hours' ? ' soon' : b.nextOpenPhrase ? ` ${b.nextOpenPhrase}` : ''}.`;
       const res = await runtime.telephony.sendSms(to, body);
       if (!res.ok) {
         await runtime.audit({ type: 'SMS_FAILED', actor: 'SYSTEM', data: { template: args.template, error: res.error } });

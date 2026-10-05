@@ -20,7 +20,7 @@ import {
   type InboundIntakeState,
 } from '@outbound-call/shared';
 import { config } from '../config.js';
-import { loadInboundSettings } from './store.js';
+import { loadLineSettings } from './store.js';
 
 const chatMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'tool']),
@@ -33,6 +33,7 @@ const chatMessageSchema = z.object({
 type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 export const simulateRequestSchema = z.object({
+  lineId: z.string().uuid().nullable().optional(),
   messages: z.array(chatMessageSchema).max(200).default([]),
   userMessage: z.string().max(4000).default(''),
   state: z.record(z.unknown()).nullable().optional(),
@@ -89,7 +90,7 @@ async function chatCompletion(messages: Array<Record<string, unknown>>) {
 }
 
 export async function runSimulationTurn(req: SimulateRequest) {
-  const settings = await loadInboundSettings(true);
+  const settings = await loadLineSettings(req.lineId, true);
   const cfg = req.overrides.enableAllActions ? withAllActions(settings.config) : settings.config;
   const outcome = req.overrides.transferOutcome ?? 'connected';
   const { runtime, log } = createMemoryRuntime({
@@ -165,6 +166,7 @@ export async function runSimulationTurn(req: SimulateRequest) {
     guardrails,
     audit: log.audit,
     sideEffects: { sms: log.sms, transfers: log.transfers, contracts: log.contracts },
+    line: settings.line.id ? { id: settings.line.id, name: settings.line.name } : null,
     business: businessStatusFor(runtime),
     actions,
     stage: currentIntakeStage(state.facts, runtime.now()),

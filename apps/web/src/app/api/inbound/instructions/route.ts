@@ -2,30 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { agentInstructionsSchema } from '@outbound-call/shared';
 import { requireAdmin, writeInboundAudit } from '@/lib/inbound-admin';
 
-/** Save agent instructions as a new active version. Older versions are kept for rollback. */
+/** Save agent instructions as a new active version for a line. Older versions are kept for rollback. */
 export async function POST(request: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const { supabase, userId, email } = auth;
 
-  const body = (await request.json()) as { content?: unknown; note?: string };
+  const body = (await request.json()) as { content?: unknown; note?: string; lineId?: string | null };
   const parsed = agentInstructionsSchema.safeParse(body.content);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Validation failed', details: parsed.error.issues }, { status: 400 });
   }
+  const lineId = body.lineId || null;
 
-  const { data: latest } = await supabase
-    .from('inbound_agent_instructions')
-    .select('version')
-    .order('version', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let latestQuery = supabase.from('inbound_agent_instructions').select('version').order('version', { ascending: false }).limit(1);
+  if (lineId) latestQuery = latestQuery.eq('line_id', lineId);
+  const { data: latest } = await latestQuery.maybeSingle();
   const version = ((latest?.version as number | undefined) ?? 0) + 1;
 
-  const { error: deactivateError } = await supabase
-    .from('inbound_agent_instructions')
-    .update({ is_active: false })
-    .eq('is_active', true);
+  let deactivate = supabase.from('inbound_agent_instructions').update({ is_active: false }).eq('is_active', true);
+  if (lineId) deactivate = deactivate.eq('line_id', lineId);
+  const { error: deactivateError } = await deactivate;
   if (deactivateError) {
     return NextResponse.json({ error: `Failed to save: ${deactivateError.message}` }, { status: 500 });
   }
@@ -37,6 +34,7 @@ export async function POST(request: NextRequest) {
     note: body.note?.slice(0, 500) || null,
     created_by: userId,
     created_by_email: email,
+    ...(lineId ? { line_id: lineId } : {}),
   });
   if (error) {
     return NextResponse.json({ error: `Failed to save: ${error.message}` }, { status: 500 });
@@ -46,7 +44,7 @@ export async function POST(request: NextRequest) {
     type: 'INSTRUCTIONS_CHANGED',
     actor: 'ADMIN',
     userId,
-    data: { version, by: email, note: body.note ?? null },
+    data: { version, line_id: lineId, by: email, note: body.note ?? null },
   });
   return NextResponse.json({ ok: true, version });
 }

@@ -16,18 +16,22 @@ export interface IntakeRow {
   high_priority: boolean;
   contract_status: string;
   created_at: string;
+  line_id?: string | null;
 }
 
-export function IntakesTable({ rows }: { rows: IntakeRow[] }) {
+/** lineNames: shown as a Line column when there is more than one line. */
+export function IntakesTable({ rows, lineNames }: { rows: IntakeRow[]; lineNames?: Record<string, string> | null }) {
   if (rows.length === 0) {
     return <p className="px-6 py-8 text-center text-sm text-slate-500">No intakes yet.</p>;
   }
+  const showLine = Boolean(lineNames && Object.keys(lineNames).length > 1);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-100">
             <th className="text-left px-6 py-3 font-medium text-slate-500">Caller</th>
+            {showLine && <th className="text-left px-6 py-3 font-medium text-slate-500">Line</th>}
             <th className="text-left px-6 py-3 font-medium text-slate-500">Case Type</th>
             <th className="text-left px-6 py-3 font-medium text-slate-500">Qualification</th>
             <th className="text-left px-6 py-3 font-medium text-slate-500">Status</th>
@@ -47,6 +51,7 @@ export function IntakesTable({ rows }: { rows: IntakeRow[] }) {
                   </Link>
                   <p className="text-xs text-slate-500 font-mono">{r.phone ?? '—'}</p>
                 </td>
+                {showLine && <td className="px-6 py-3 text-slate-700">{(r.line_id && lineNames?.[r.line_id]) ?? '—'}</td>}
                 <td className="px-6 py-3 text-slate-700">
                   {r.case_type ? INBOUND_CASE_TYPE_LABELS[r.case_type as InboundCaseType] ?? r.case_type : '—'}
                 </td>

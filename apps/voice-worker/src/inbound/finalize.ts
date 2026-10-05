@@ -1,6 +1,6 @@
 import { deriveIntakeStatus, evaluateQualification, formatIntakeSummary } from '@outbound-call/shared';
 import { logger } from '../utils/logger.js';
-import { getInboundCall, loadInboundSettings, loadIntakeForCall, saveIntakeState, updateInboundCall, writeAudit } from './store.js';
+import { getInboundCall, loadIntakeForCall, loadLineSettings, saveIntakeState, updateInboundCall, writeAudit } from './store.js';
 
 const finalized = new Set<string>();
 
@@ -25,7 +25,7 @@ export async function finalizeInboundCall(callId: string, reason: string, opts: 
   }
   finalized.add(callId);
 
-  const { config } = await loadInboundSettings();
+  const { config } = await loadLineSettings(call.line_id);
   if (state.facts.caller_type === 'new_potential_client' && config.flags.qualification_enabled) {
     state.qualification = evaluateQualification(state.facts, config.qualification);
   }

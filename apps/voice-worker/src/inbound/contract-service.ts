@@ -9,6 +9,7 @@ import {
 } from '@outbound-call/shared';
 import { config as env } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { loadIntegrations } from './store.js';
 import { sendSms } from './telephony.js';
 
 function fill(template: string, vars: Record<string, string>): string {
@@ -23,9 +24,12 @@ function toE164(phone: string | null): string | null {
   return phone.trim().startsWith('+') ? `+${digits}` : null;
 }
 
-async function signflowFetch(path: string, init: RequestInit = {}): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string }> {
-  const base = env.SIGNFLOW_BASE_URL.trim().replace(/\/$/, '');
-  if (!base || !env.SIGNFLOW_INTAKE_TOKEN) return { ok: false, error: 'Sign Flow is not configured (SIGNFLOW_BASE_URL / SIGNFLOW_INTAKE_TOKEN)' };
+export type SignflowResult = { ok: true; body: Record<string, unknown> } | { ok: false; error: string; status?: number };
+
+export async function signflowFetch(path: string, init: RequestInit = {}): Promise<SignflowResult> {
+  const base = (await loadIntegrations()).signflow_base_url.replace(/\/$/, '');
+  if (!base) return { ok: false, error: 'Sign Flow URL is not set (Inbound → Setup & Environment)' };
+  if (!env.SIGNFLOW_INTAKE_TOKEN) return { ok: false, error: 'SIGNFLOW_INTAKE_TOKEN is not set on the voice worker' };
   try {
     const res = await fetch(`${base}${path}`, {
       ...init,
@@ -33,7 +37,7 @@ async function signflowFetch(path: string, init: RequestInit = {}): Promise<{ ok
       signal: AbortSignal.timeout(20_000),
     });
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) return { ok: false, error: typeof body.error === 'string' ? body.error : `Sign Flow responded ${res.status}` };
+    if (!res.ok) return { ok: false, status: res.status, error: typeof body.error === 'string' ? body.error : `Sign Flow responded ${res.status}` };
     return { ok: true, body };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Sign Flow request failed' };
@@ -68,7 +72,12 @@ function signflowStatus(body: Record<string, unknown>): AgreementStatus {
  *  - webhook:  POSTs the intake to an e-sign integration, which returns { external_id, signing_url };
  *              the signing URL is texted. Signature status comes back on /webhooks/inbound/contracts/:provider.
  */
-export function createContractService(config: InboundConfig, smsFrom: string): InboundContractService {
+export function signflowCallbackUrl(): string | undefined {
+  const base = env.VOICE_WORKER_BASE_URL?.trim().replace(/\/$/, '');
+  return base?.startsWith('https://') ? `${base}/webhooks/inbound/contracts/signflow` : undefined;
+}
+
+export function createContractService(config: InboundConfig, smsFrom: string, line: { signflowFirmId?: string } = {}): InboundContractService {
   const c = config.contracts;
 
   if (c.provider === 'signflow') {
@@ -92,6 +101,8 @@ export function createContractService(config: InboundConfig, smsFrom: string): I
             sendEmail: req.delivery === 'email',
             reminderEnabled: true,
             externalRef: state.intakeId,
+            firmId: line.signflowFirmId || undefined,
+            callbackUrl: signflowCallbackUrl(),
           }),
         });
         if (!res.ok) {
@@ -174,7 +185,7 @@ export function createContractService(config: InboundConfig, smsFrom: string): I
         }
       }
 
-      const sms = await sendSms(smsFrom, toPhone, fill(c.sms_message_template, { ...vars, link }));
+      const sms = await sendSms(smsFrom, toPhone, fill(c.sms_message_template, { ...vars, link, firm_name: config.firm_name }));
       if (!sms.ok) return { ok: false, provider: c.provider, error: sms.error };
       return { ok: true, provider: c.provider, externalId };
     },

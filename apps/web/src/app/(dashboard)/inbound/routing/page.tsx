@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox, selectClass } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
+import { LinePicker } from '@/components/inbound/line-context';
 
 const DAY_LABELS: Record<Weekday, string> = { sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday' };
 const TIMEZONES = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles'];
@@ -41,6 +42,7 @@ export default function RoutingAndHoursPage() {
   return (
     <div className="space-y-6 max-w-4xl">
       <InboundPageHeader title="Routing & Hours" description="When the team is available, where transfers go, and what happens when the AI is off." />
+      <LinePicker />
       {loadError && <WarningBox>{loadError}</WarningBox>}
 
       <Card>

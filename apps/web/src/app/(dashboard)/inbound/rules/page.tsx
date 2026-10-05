@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox, selectClass } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
+import { LinePicker } from '@/components/inbound/line-context';
 import { QualificationBadge } from '@/components/inbound/badges';
 
 const OP_LABELS: Record<RuleOperator, string> = {
@@ -123,6 +124,7 @@ export default function QualificationRulesPage() {
         title="Qualification Rules"
         description="The AI only collects facts. These rules decide the result. Reasons are stored for staff and never read to the caller."
       />
+      <LinePicker />
       {loadError && <WarningBox>{loadError}</WarningBox>}
 
       <Card>

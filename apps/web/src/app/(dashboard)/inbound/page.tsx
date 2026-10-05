@@ -36,7 +36,10 @@ export default async function InboundDashboardPage() {
       supabase.from('inbound_calls').select('id, from_number, started_at, status').in('status', ['ringing', 'in_progress', 'transferring']).limit(10),
     ]);
 
-  const cfg = resolveInboundConfig(settings);
+  const { data: lineRows, error: linesError } = await supabase.from('inbound_lines').select('*').eq('active', true).order('name');
+  const lineConfigs = linesError ? [resolveInboundConfig(settings)] : (lineRows ?? []).map((r) => resolveInboundConfig(r));
+  const offLines = lineConfigs.filter((c) => !c.flags.inbound_enabled || !c.flags.inbound_voice_enabled);
+  const cfg = offLines[0] ?? lineConfigs[0] ?? resolveInboundConfig(settings);
   const intakes = intakesToday ?? [];
   const metrics = [
     { label: 'Calls Today', value: (callsToday ?? []).length },
@@ -59,10 +62,11 @@ export default async function InboundDashboardPage() {
           Inbound tables are not available yet. Run the inbound intake migration in Supabase first.
         </div>
       )}
-      {!settingsError && (!cfg.flags.inbound_enabled || !cfg.flags.inbound_voice_enabled) && (
+      {!settingsError && offLines.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          The inbound AI is <strong>off</strong>. Calls to the intake number use fallback routing (
-          {cfg.routing.disabled_behavior === 'forward_to_primary' ? 'forwarded to the primary number' : 'a recorded message'}).
+          The inbound AI is <strong>off</strong>
+          {linesError ? '' : ` for ${offLines.map((c) => c.firm_name).join(', ')}`}. Calls to {offLines.length > 1 ? 'those lines' : 'that line'} use
+          fallback routing ({cfg.routing.disabled_behavior === 'forward_to_primary' ? 'forwarded to the primary number' : 'a recorded message'}).
           Turn it on in <Link href="/inbound/settings" className="underline">Settings</Link> after testing with the{' '}
           <Link href="/inbound/test" className="underline">Test Agent</Link>.
         </div>

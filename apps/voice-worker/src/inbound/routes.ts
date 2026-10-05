@@ -13,14 +13,18 @@ import {
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
+import { signflowFetch } from './contract-service.js';
 import { finalizeInboundCall } from './finalize.js';
 import { runSimulationTurn, simulateRequestSchema } from './simulate.js';
 import {
   createInboundCallWithIntake,
   getInboundCall,
   getInboundCallBySid,
-  loadInboundSettings,
+  listActiveLines,
   loadIntakeById,
+  loadIntegrations,
+  loadLineSettings,
+  resolveLineForNumber,
   loadIntakeForCall,
   saveIntakeState,
   updateInboundCall,
@@ -47,7 +51,7 @@ function rejectUnsigned(req: Request, res: Response): boolean {
 inboundRouter.post('/webhooks/inbound/twilio/voice', async (req: Request, res: Response): Promise<void> => {
   if (rejectUnsigned(req, res)) return;
   const body = req.body as Record<string, string>;
-  const { config: inbound } = await loadInboundSettings(true);
+  const { line, config: inbound } = await resolveLineForNumber(body.To ?? null, true);
 
   try {
     const business = getBusinessStatus(inbound.business_hours);
@@ -57,8 +61,8 @@ inboundRouter.post('/webhooks/inbound/twilio/voice', async (req: Request, res: R
       (business.status === 'business_hours' || inbound.flags.after_hours_ai_enabled);
 
     if (!aiAllowed) {
-      logger.info('Inbound AI disabled; using fallback routing', { twilioCallSid: body.CallSid });
-      sendTwiml(res, fallbackTwiml(inbound.routing));
+      logger.info('Inbound AI disabled; using fallback routing', { twilioCallSid: body.CallSid, line: line.slug });
+      sendTwiml(res, fallbackTwiml(inbound));
       return;
     }
 
@@ -68,20 +72,25 @@ inboundRouter.post('/webhooks/inbound/twilio/voice', async (req: Request, res: R
       to: body.To ?? null,
       forwardedFrom: body.ForwardedFrom ?? null,
       businessStatus: business.status,
+      lineId: line.id,
     });
     if (!created) {
-      sendTwiml(res, fallbackTwiml(inbound.routing));
+      sendTwiml(res, fallbackTwiml(inbound));
       return;
     }
 
     await writeAudit(
       { callId: created.callId, intakeId: created.intakeId },
-      { type: 'CALL_STARTED', actor: 'SYSTEM', data: { business_status: business.status, forwarded_from: body.ForwardedFrom ?? null } },
+      {
+        type: 'CALL_STARTED',
+        actor: 'SYSTEM',
+        data: { business_status: business.status, forwarded_from: body.ForwardedFrom ?? null, line: line.slug || null },
+      },
     );
     sendTwiml(res, sipBridgeTwiml(created.callId));
   } catch (err) {
     logger.error('Inbound voice webhook failed', { error: err, twilioCallSid: body.CallSid });
-    sendTwiml(res, fallbackTwiml(inbound.routing));
+    sendTwiml(res, fallbackTwiml(inbound));
   }
 });
 
@@ -97,11 +106,12 @@ inboundRouter.post('/webhooks/inbound/twilio/ai-ended', async (req: Request, res
     return;
   }
 
-  const { config: inbound } = await loadInboundSettings();
+  const call = callId ? await getInboundCall(callId) : null;
+  const { config: inbound } = await loadLineSettings(call?.line_id);
   logger.warn('Inbound AI leg failed; falling back', { inboundCallId: callId, dialStatus: status });
   const state = callId ? await loadIntakeForCall(callId) : null;
   await writeAudit({ callId, intakeId: state?.intakeId }, { type: 'TRANSFER_FAILED', actor: 'SYSTEM', data: { leg: 'ai', dial_status: status, fallback: inbound.routing.disabled_behavior } });
-  sendTwiml(res, fallbackTwiml(inbound.routing));
+  sendTwiml(res, fallbackTwiml(inbound));
   if (callId) void finalizeInboundCall(callId, `ai_unavailable:${status}`, { force: true });
 });
 
@@ -114,11 +124,12 @@ inboundRouter.post('/webhooks/inbound/twilio/transfer-result', async (req: Reque
   const dialStatus = String((req.body as Record<string, string>).DialCallStatus ?? '');
   const connected = dialStatus === 'completed' || dialStatus === 'answered';
 
-  const [state, call, settings] = await Promise.all([loadIntakeForCall(callId), getInboundCall(callId), loadInboundSettings()]);
+  const [state, call] = await Promise.all([loadIntakeForCall(callId), getInboundCall(callId)]);
   if (!state || !call) {
     sendTwiml(res, twiml('  <Hangup/>'));
     return;
   }
+  const settings = await loadLineSettings(call.line_id);
 
   const attempt = [...state.transfers].reverse().find((t) => t.label === label && t.success === null);
   if (attempt) {
@@ -172,10 +183,12 @@ inboundRouter.post('/webhooks/inbound/twilio/transfer-result', async (req: Reque
 
 inboundRouter.post('/webhooks/inbound/twilio/whisper', async (req: Request, res: Response): Promise<void> => {
   if (rejectUnsigned(req, res)) return;
-  const state = await loadIntakeForCall(String(req.query.callId ?? ''));
+  const callId = String(req.query.callId ?? '');
+  const [state, call] = await Promise.all([loadIntakeForCall(callId), getInboundCall(callId)]);
+  const { config: inbound } = await loadLineSettings(call?.line_id);
   const f = state?.facts;
   const parts = [
-    'Ramos James intake transfer.',
+    `${inbound.firm_name} intake transfer.`,
     state?.highPriority || state?.qualification?.result === 'high_priority' ? 'High priority.' : '',
     f?.caller_type === 'existing_client' ? 'Existing client.' : '',
     f?.caller_name ? `Caller: ${f.caller_name}.` : '',
@@ -199,16 +212,24 @@ inboundRouter.post('/webhooks/inbound/twilio/status', async (req: Request, res: 
 
 // ---------- E-signature status webhook ----------
 
-inboundRouter.post('/webhooks/inbound/contracts/:provider', async (req: Request, res: Response): Promise<void> => {
-  const secret = config.INBOUND_CONTRACT_WEBHOOK_SECRET;
-  if (!secret) {
-    res.status(503).json({ error: 'Contract webhook not configured' });
-    return;
-  }
-  const provided = String(req.headers['x-inbound-contract-secret'] ?? '');
+function safeEqual(provided: string, secret: string): boolean {
+  if (!secret || !provided) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(secret);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+inboundRouter.post('/webhooks/inbound/contracts/:provider', async (req: Request, res: Response): Promise<void> => {
+  const bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+  const legacy = String(req.headers['x-inbound-contract-secret'] ?? '');
+  const authorized =
+    (req.params.provider === 'signflow' && safeEqual(bearer, config.SIGNFLOW_INTAKE_TOKEN)) ||
+    safeEqual(legacy, config.INBOUND_CONTRACT_WEBHOOK_SECRET);
+  if (!authorized) {
+    if (!config.SIGNFLOW_INTAKE_TOKEN && !config.INBOUND_CONTRACT_WEBHOOK_SECRET) {
+      res.status(503).json({ error: 'Contract webhook not configured' });
+      return;
+    }
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -250,14 +271,79 @@ inboundRouter.post('/webhooks/inbound/contracts/:provider', async (req: Request,
   res.status(200).json({ ok: true, status: state.status });
 });
 
-// ---------- Text Test Agent (called by the web app) ----------
+// ---------- Internal endpoints (called by the web app) ----------
 
-inboundRouter.post('/internal/inbound/simulate', async (req: Request, res: Response): Promise<void> => {
+function rejectInternal(req: Request, res: Response): boolean {
   const auth = (req.headers['x-internal-secret'] as string | undefined) ?? (req.headers['x-voice-worker-secret'] as string | undefined);
-  if (!auth || auth !== config.VOICE_WORKER_INTERNAL_SECRET) {
-    res.status(401).json({ error: 'Unauthorized' });
+  if (safeEqual(auth ?? '', config.VOICE_WORKER_INTERNAL_SECRET)) return false;
+  res.status(401).json({ error: 'Unauthorized' });
+  return true;
+}
+
+/** Which worker env vars are set (booleans only, never values) plus the derived webhook URLs. */
+inboundRouter.get('/internal/inbound/env-status', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
+  const set = (v: string | undefined) => Boolean(v && v.trim() && !v.startsWith('mock-'));
+  const base = config.VOICE_WORKER_BASE_URL.replace(/\/$/, '');
+  const integrations = await loadIntegrations(true);
+  res.json({
+    mode: config.VOICE_MODE,
+    env: {
+      SUPABASE_URL: set(config.SUPABASE_URL),
+      SUPABASE_SERVICE_ROLE_KEY: set(config.SUPABASE_SERVICE_ROLE_KEY),
+      XAI_API_KEY: set(config.XAI_API_KEY),
+      XAI_AGENT_ID: set(config.XAI_AGENT_ID),
+      XAI_SIP_URI: set(config.XAI_SIP_URI) && !config.XAI_SIP_URI.includes('mock@'),
+      XAI_SIP_WEBHOOK_SECRET: set(config.XAI_SIP_WEBHOOK_SECRET),
+      TWILIO_ACCOUNT_SID: set(config.TWILIO_ACCOUNT_SID),
+      TWILIO_AUTH_TOKEN: set(config.TWILIO_AUTH_TOKEN),
+      TWILIO_PHONE_NUMBER: set(config.TWILIO_PHONE_NUMBER) && config.TWILIO_PHONE_NUMBER !== '+10000000000',
+      VOICE_WORKER_INTERNAL_SECRET: set(config.VOICE_WORKER_INTERNAL_SECRET),
+      VOICE_WORKER_BASE_URL: base.startsWith('https://'),
+      APP_BASE_URL: !config.APP_BASE_URL.includes('localhost'),
+      SIGNFLOW_INTAKE_TOKEN: set(config.SIGNFLOW_INTAKE_TOKEN),
+      INBOUND_CONTRACT_WEBHOOK_SECRET: set(config.INBOUND_CONTRACT_WEBHOOK_SECRET),
+    },
+    urls: {
+      voice: `${base}/webhooks/inbound/twilio/voice`,
+      status: `${base}/webhooks/inbound/twilio/status`,
+      signflowCallback: `${base}/webhooks/inbound/contracts/signflow`,
+    },
+    integrations,
+    lines: (await listActiveLines()).map((l) => ({ id: l.id, name: l.name, phone_numbers: l.phone_numbers, is_default: l.is_default })),
+  });
+});
+
+/** Sign Flow connection check: its firms (accounts) and which of its env vars are set. */
+inboundRouter.get('/internal/inbound/signflow/health', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
+  const r = await signflowFetch('/api/intake/health');
+  res.status(r.ok ? 200 : 502).json(r.ok ? r.body : { ok: false, error: r.error });
+});
+
+inboundRouter.get('/internal/inbound/signflow/templates', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
+  const firmId = String(req.query.firmId ?? '').trim();
+  const r = await signflowFetch(`/api/intake/templates${firmId ? `?firmId=${encodeURIComponent(firmId)}` : ''}`);
+  res.status(r.ok ? 200 : 502).json(r.ok ? r.body : { ok: false, error: r.error });
+});
+
+inboundRouter.get('/internal/inbound/signflow/templates/:id', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: 'Invalid template id' });
     return;
   }
+  const firmId = String(req.query.firmId ?? '').trim();
+  const r = await signflowFetch(`/api/intake/templates/${id}${firmId ? `?firmId=${encodeURIComponent(firmId)}` : ''}`);
+  res.status(r.ok ? 200 : 502).json(r.ok ? r.body : { ok: false, error: r.error });
+});
+
+// ---------- Text Test Agent ----------
+
+inboundRouter.post('/internal/inbound/simulate', async (req: Request, res: Response): Promise<void> => {
+  if (rejectInternal(req, res)) return;
   const parsed = simulateRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Validation failed', details: parsed.error.issues });

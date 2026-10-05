@@ -29,9 +29,10 @@ export function createMemoryRuntime(opts: SimulationOptions = {}): { runtime: In
   const outcomes = [...(opts.transferOutcomes ?? [])];
   const now = () => opts.now ?? new Date();
 
+  const config = opts.config ?? resolveInboundConfig({});
   const runtime: InboundRuntime = {
-    config: opts.config ?? resolveInboundConfig({}),
-    instructions: opts.instructions ?? resolveAgentInstructions({}),
+    config,
+    instructions: opts.instructions ?? resolveAgentInstructions({}, config.firm_name),
     now,
     businessOverride: opts.businessOverride ?? null,
     async audit(event) {

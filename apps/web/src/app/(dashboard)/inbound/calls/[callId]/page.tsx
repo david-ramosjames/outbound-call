@@ -36,6 +36,7 @@ interface CallData {
   answered_at: string | null;
   ended_at: string | null;
   duration_seconds: number | null;
+  line_id?: string | null;
 }
 
 interface IntakeData {
@@ -81,18 +82,24 @@ export default function InboundCallDetailPage() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [liveEnabled, setLiveEnabled] = useState(true);
+  const [lineName, setLineName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
-    const [c, i, s, a, cb, settings] = await Promise.all([
+    const [c, i, s, a, cb] = await Promise.all([
       supabase.from('inbound_calls').select('*').eq('id', callId).maybeSingle(),
       supabase.from('inbound_intakes').select('*').eq('call_id', callId).order('created_at').limit(1).maybeSingle(),
       supabase.from('inbound_transcript_segments').select('id, speaker, text, created_at').eq('call_id', callId).order('id'),
       supabase.from('inbound_audit_events').select('id, event_type, actor, event_data, created_at').eq('call_id', callId).order('id'),
       supabase.from('inbound_callback_requests').select('*').eq('call_id', callId).order('created_at'),
-      supabase.from('inbound_settings').select('flags').eq('id', 1).maybeSingle(),
     ]);
-    setLiveEnabled(resolveInboundConfig(settings.data).flags.live_dashboard_enabled);
+    const callLineId = (c.data as CallData | null)?.line_id;
+    const settings = callLineId
+      ? await supabase.from('inbound_lines').select('name, flags').eq('id', callLineId).maybeSingle()
+      : await supabase.from('inbound_settings').select('flags').eq('id', 1).maybeSingle();
+    const resolved = resolveInboundConfig(settings.data);
+    setLiveEnabled(resolved.flags.live_dashboard_enabled);
+    setLineName(callLineId ? resolved.firm_name : null);
     setCall(c.data as CallData | null);
     setIntake((prev) => {
       const next = i.data as IntakeData | null;
@@ -182,6 +189,12 @@ export default function InboundCallDetailPage() {
             <p className="text-xs text-slate-500">Intake stage</p>
             <p className="font-medium capitalize">{stage.replace(/_/g, ' ')}</p>
           </div>
+          {lineName && (
+            <div>
+              <p className="text-xs text-slate-500">Line</p>
+              <p className="font-medium">{lineName}</p>
+            </div>
+          )}
           <div>
             <p className="text-xs text-slate-500">Office</p>
             <p className="font-medium capitalize">{call.business_status?.replace('_', ' ') ?? '—'}</p>

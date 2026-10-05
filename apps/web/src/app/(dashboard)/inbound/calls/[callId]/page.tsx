@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { InboundCallStatusBadge, IntakeStatusBadge, QualificationBadge } from '@/components/inbound/badges';
 import { LoadingSpinner, selectClass } from '@/components/inbound/page-header';
+import { AuditLog, type AuditRow } from '@/components/inbound/audit-log';
 import { cn, formatDuration } from '@/lib/utils';
 
 interface CallData {
@@ -57,7 +58,6 @@ interface IntakeData {
 }
 
 interface Segment { id: number; speaker: string; text: string; created_at: string }
-interface AuditRow { id: number; event_type: string; actor: string; event_data: Record<string, unknown>; created_at: string }
 interface CallbackRow { id: string; priority: string; reason: string; phone: string | null; preferred_time: string | null; status: string; created_at: string }
 
 const LIVE_STATUSES = ['ringing', 'in_progress', 'transferring'];
@@ -245,25 +245,9 @@ export default function InboundCallDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Actions &amp; Audit Log</CardTitle>
+              <CardTitle>Call Timeline</CardTitle>
             </CardHeader>
-            <div className="divide-y divide-slate-100">
-              {audit.length === 0 && <p className="px-6 py-4 text-sm text-slate-500">No events.</p>}
-              {audit.map((e) => (
-                <div key={e.id} className="px-6 py-2.5 text-sm flex gap-3">
-                  <span className="text-xs text-slate-400 w-20 shrink-0">{format(new Date(e.created_at), 'h:mm:ss a')}</span>
-                  <span className="text-[10px] font-semibold rounded bg-slate-100 text-slate-600 px-1.5 py-0.5 h-fit">{e.actor}</span>
-                  <div className="min-w-0">
-                    <p className={cn('font-medium', e.event_type.includes('FAILED') || e.event_type === 'GUARDRAIL_FLAGGED' ? 'text-red-700' : 'text-slate-900')}>
-                      {e.event_type}
-                    </p>
-                    {Object.keys(e.event_data ?? {}).length > 0 && (
-                      <p className="text-xs text-slate-500 break-words">{JSON.stringify(e.event_data)}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <AuditLog events={audit} />
           </Card>
         </div>
 

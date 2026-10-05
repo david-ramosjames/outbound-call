@@ -63,6 +63,7 @@ const SECTIONS: Array<{ title: string; description: string; fields: Array<{ key:
       { key: 'transfer_language', label: 'Before a transfer', rows: 2 },
       { key: 'transfer_failed_language', label: 'Transfer failed', rows: 3 },
       { key: 'contract_language', label: 'Offering the engagement agreement', rows: 2 },
+      { key: 'hesitation_language', label: 'When the caller hesitates to sign', rows: 2 },
       { key: 'decline_language', label: 'Declining politely', rows: 3 },
       { key: 'after_hours_language', label: 'After hours', rows: 2 },
       { key: 'existing_client_language', label: 'Existing clients', rows: 2 },

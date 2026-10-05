@@ -215,6 +215,15 @@ describe('inbound intake: 20 seed scenarios', () => {
     expect(s.state.qualification?.reasons.join(' ')).toMatch(/encourage medical care/i);
   });
 
+  it('8d. a first name alone still asks for the last name', async () => {
+    const s = setup();
+    await s.tool('update_intake', { facts: { caller_type: 'new_potential_client' } });
+    await s.tool('save_contact_information', { caller_name: 'David', use_caller_id_number: true });
+    expect(getMissingFields(s.state.facts, BUSINESS_NOW).missing.map((m) => m.key)).toContain('caller_name');
+    await s.tool('save_contact_information', { caller_name: 'David Ramos' });
+    expect(getMissingFields(s.state.facts, BUSINESS_NOW).missing.map((m) => m.key)).not.toContain('caller_name');
+  });
+
   it('8c. fault: unclear needs review; not yet asked is reported as missing', async () => {
     const s = setup();
     await strongAuto(s.tool);

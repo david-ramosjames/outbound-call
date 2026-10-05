@@ -507,7 +507,12 @@ export const agentInstructionsSchema = z.object({
   contract_language: z
     .string()
     .default(
-      "Based on the information you've provided, I can send you our engagement agreement to review and sign right now, by text or email. Would you like me to send it?",
+      "Based on the information you've provided, I can send you our engagement agreement to review and sign right now, by text or email. There's no upfront fee; the firm only gets paid if you recover money on your case. Would you like me to send it?",
+    ),
+  hesitation_language: z
+    .string()
+    .default(
+      "Absolutely, that makes sense. Is there anything about the agreement you're unsure about that I could explain before you talk it over?",
     ),
   decline_language: z
     .string()

@@ -180,7 +180,7 @@ export interface MissingField {
 }
 
 const BASE_FIELDS: MissingField[] = [
-  { key: 'caller_name', label: 'Caller name', hint: 'Full name of the caller' },
+  { key: 'caller_name', label: 'Caller name', hint: 'Full name (first and last). If they gave only a first name, ask for their last name' },
   { key: 'phone', label: 'Callback number', hint: 'Best number to reach them (confirm if it is the number they are calling from)' },
   { key: 'case_type', label: 'Type of incident', hint: 'What kind of incident this was' },
   { key: 'incident_date', label: 'When it happened', hint: 'Date of the incident (approximate is fine)' },
@@ -254,6 +254,9 @@ function hasValue(facts: IntakeFacts, key: string): boolean {
   }
   if (key.startsWith('case_specific.')) {
     return Boolean(facts.case_specific?.[key.slice('case_specific.'.length)]);
+  }
+  if (key === 'caller_name') {
+    return (facts.caller_name ?? '').trim().split(/\s+/).filter(Boolean).length >= 2;
   }
   if (key === 'injury_description') {
     return Boolean(facts.injury_description || (facts.injury_severity && facts.injury_severity !== 'unknown'));

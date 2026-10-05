@@ -62,7 +62,7 @@ const enumOf = (values: readonly string[], description: string) => ({ type: 'str
 
 const FACT_PROPERTIES: Record<string, Record<string, unknown>> = {
   caller_type: enumOf(INBOUND_CALLER_TYPES, 'new_potential_client for a new injury matter, existing_client, or other (vendor, medical provider, insurance company, wrong number, etc.)'),
-  caller_name: str('Caller full name'),
+  caller_name: str('Caller full name (first and last)'),
   caller_relationship_to_injured_person: str('If calling for someone else: relationship (self, spouse, parent, child, friend...)'),
   injured_person_name: str('Name of the injured person if not the caller'),
   case_type: enumOf(INBOUND_CASE_TYPES, 'Type of incident'),
@@ -123,7 +123,7 @@ export function getInboundToolDefinitions(): ToolDef[] {
       name: 'save_contact_information',
       description: 'Save the caller\'s name, callback number, email, or preferred language as soon as you learn them. Set use_caller_id_number true if they confirm the number they are calling from is best.',
       parameters: obj({
-        caller_name: str('Full name'),
+        caller_name: str('Full name, first and last. If you only have a first name, save it and ask for the last name.'),
         phone: str('Callback number, digits as spoken'),
         email: str('Email as spoken'),
         use_caller_id_number: bool('Caller confirmed the number they are calling from is the best callback number'),

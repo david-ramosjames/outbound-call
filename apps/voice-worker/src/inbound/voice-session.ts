@@ -26,6 +26,12 @@ const activeSessions = new Map<string, InboundVoiceSession>();
 
 /** Silence kept on the line after the goodbye finishes, in case the caller has one more question. */
 const END_GRACE_MS = 3000;
+/** Tool still running after this long: the agent tells the caller to hold on. */
+const FILLER_AFTER_MS = 2500;
+/** Caller stopped talking and no response started: ask for one. */
+const NUDGE_AFTER_MS = 3500;
+/** Still nothing: reassure the caller ("I'm still here"). */
+const STILL_HERE_AFTER_MS = 9000;
 
 export function getActiveInboundSession(callId: string): InboundVoiceSession | undefined {
   return activeSessions.get(callId);
@@ -46,6 +52,15 @@ export class InboundVoiceSession {
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   /** When the agent's queued speech should finish playing (estimated). */
   private speechEndsAt = 0;
+  /** Text spoken in the current / most recent agent response. */
+  private responseText = '';
+  private lastResponseText = '';
+  private lastResponseCreatedAt = 0;
+  private toolsInFlight = 0;
+  /** Tool results are in; the agent should speak once its response and all tools have finished. */
+  private pendingFollowUp = false;
+  private fillerTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchdogTimers: Array<ReturnType<typeof setTimeout>> = [];
 
   constructor(
     private readonly callId: string,
@@ -111,6 +126,8 @@ export class InboundVoiceSession {
     this.ws.on('close', () => {
       if (this.maxTimer) clearTimeout(this.maxTimer);
       if (this.endTimer) clearTimeout(this.endTimer);
+      if (this.fillerTimer) clearTimeout(this.fillerTimer);
+      this.clearWatchdog();
       activeSessions.delete(this.callId);
       void this.flushAgentText();
       if (this.state.transferInProgress) {
@@ -161,9 +178,14 @@ export class InboundVoiceSession {
         break;
       case 'response.created':
         this.responseActive = true;
+        this.responseText = '';
+        this.lastResponseCreatedAt = Date.now();
+        this.clearWatchdog();
         break;
       case 'response.done':
         this.responseActive = false;
+        this.lastResponseText = this.responseText;
+        this.maybeFollowUp();
         break;
       case 'response.audio_transcript.delta':
       case 'response.output_audio_transcript.delta':
@@ -173,11 +195,17 @@ export class InboundVoiceSession {
       case 'response.output_audio_transcript.done': {
         const text = String(event.transcript ?? '') || this.agentText;
         this.agentText = '';
+        this.responseText = `${this.responseText} ${text}`.trim();
         await this.recordAgentText(text);
         break;
       }
       case 'input_audio_buffer.speech_started':
+        // The caller is talking; the agent will answer them (with any tool results already in context).
+        this.pendingFollowUp = false;
         this.cancelPendingEnd();
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        this.startWatchdog();
         break;
       case 'conversation.item.input_audio_transcription.completed': {
         const text = String(event.transcript ?? '').trim();
@@ -251,18 +279,91 @@ export class InboundVoiceSession {
     }
 
     logger.info(`Inbound tool call: ${name}`, { ...this.logCtx, eventType: 'tool_call_requested' });
-    const result = await executeInboundTool(name, args, this.state, this.runtime);
-
-    if (result.transferStarted && result.endCall === undefined) {
-      // Twilio is moving the caller to a human; the AI leg will drop on its own.
-      this.sendToolResult(toolCallId, result.output, false);
-      return;
+    this.toolsInFlight += 1;
+    if (!this.fillerTimer) this.fillerTimer = setTimeout(() => this.sayFiller(), FILLER_AFTER_MS);
+    let result: Awaited<ReturnType<typeof executeInboundTool>>;
+    try {
+      result = await executeInboundTool(name, args, this.state, this.runtime);
+    } finally {
+      this.toolsInFlight -= 1;
+      if (this.toolsInFlight === 0 && this.fillerTimer) {
+        clearTimeout(this.fillerTimer);
+        this.fillerTimer = null;
+      }
     }
-    this.sendToolResult(toolCallId, result.output, !result.endCall);
+
+    this.sendToolResult(toolCallId, result.output, false);
+    // Twilio is moving the caller to a human; the AI leg will drop on its own.
+    if (result.transferStarted && result.endCall === undefined) return;
     if (result.endCall) {
       this.endRequested = 'agent_end_call';
       this.scheduleEnd();
+      return;
     }
+    this.pendingFollowUp = true;
+    this.maybeFollowUp();
+  }
+
+  /**
+   * One response per turn: speak after the current response and every tool call have finished.
+   * Asking for a response while one is still running is what left callers in long silences.
+   * If the agent just asked the caller a question, wait for their answer instead of talking over it.
+   */
+  private maybeFollowUp(): void {
+    if (!this.pendingFollowUp || this.toolsInFlight > 0 || this.responseActive || this.closing || this.endRequested) return;
+    this.pendingFollowUp = false;
+    if (/\?\s*["”']?$/.test(this.lastResponseText.trim())) {
+      logger.info('Agent asked a question; waiting for the caller before continuing', this.logCtx);
+      return;
+    }
+    this.send({ type: 'response.create' });
+  }
+
+  /** A tool is taking a while: let the caller know instead of leaving dead air. */
+  private sayFiller(): void {
+    this.fillerTimer = null;
+    if (this.toolsInFlight === 0 || this.responseActive || this.closing) return;
+    logger.info('Tool call slow; telling the caller to hold on', this.logCtx);
+    this.send({
+      type: 'response.create',
+      response: {
+        instructions:
+          'An action you started is still finishing. Say one short, natural sentence so the caller knows you are still here and working on it, e.g. "One moment, I\'m just saving that for you." Do not call any tools and do not say anything else.',
+        tool_choice: 'none',
+      },
+    });
+  }
+
+  /** The caller finished speaking: make sure the agent actually answers. */
+  private startWatchdog(): void {
+    this.clearWatchdog();
+    if (this.closing) return;
+    const stoppedAt = Date.now();
+    const answered = () => this.lastResponseCreatedAt >= stoppedAt;
+    this.watchdogTimers.push(
+      setTimeout(() => {
+        if (answered() || this.responseActive || this.toolsInFlight > 0 || this.closing) return;
+        logger.warn('No agent response after the caller spoke; nudging', this.logCtx);
+        this.send({ type: 'response.create' });
+      }, NUDGE_AFTER_MS),
+      setTimeout(() => {
+        if (answered() || this.closing) return;
+        logger.warn('Agent still silent; reassuring the caller', { ...this.logCtx, errorCategory: 'xai_stall' });
+        if (this.responseActive) this.send({ type: 'response.cancel' });
+        this.send({
+          type: 'response.create',
+          response: {
+            instructions:
+              'There has been a long silence. Say: "I\'m still here. Sorry, this is taking a little longer than expected." Then answer or continue from where the conversation left off. Do not invent a reason for the delay.',
+          },
+        });
+      }, STILL_HERE_AFTER_MS),
+    );
+  }
+
+  private clearWatchdog(): void {
+    for (const t of this.watchdogTimers) clearTimeout(t);
+    this.watchdogTimers = [];
   }
 
   /** Rough playback time of spoken text; the realtime API sends text faster than the audio plays. */

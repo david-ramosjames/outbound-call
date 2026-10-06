@@ -83,6 +83,26 @@ export async function saveKeypadMetadata(callSessionId: string, meta: KeypadMeta
   if (error) logger.error('Failed to save keypad metadata', { callSessionId, error });
 }
 
+/**
+ * Right after the leg leaves the conference the media path is still re-settling and the first tone is often lost,
+ * so lead with a 1 s pause ("ww").
+ */
+export function toneSequence(digits: string): string {
+  return `ww${digits.toLowerCase()}`;
+}
+
+export async function clearKeypadMetadata(callSessionId: string): Promise<void> {
+  const { data } = await supabase.from('call_sessions').select('provider_metadata').eq('id', callSessionId).maybeSingle();
+  const existing = { ...(((data as { provider_metadata?: Record<string, unknown> | null } | null)?.provider_metadata) ?? {}) };
+  delete existing.keypad_conference;
+  delete existing.ai_call_sid;
+  await supabase.from('call_sessions').update({ provider_metadata: existing }).eq('id', callSessionId);
+}
+
+export async function redirectCall(callSid: string, twiml: string): Promise<void> {
+  await twilio().calls(callSid).update({ twiml });
+}
+
 export type PressKeysResult = { ok: true } | { ok: false; reason: 'not_available' | 'invalid_digits' | 'failed'; error?: string };
 
 /** Play DTMF to the carrier: step its leg out of the conference, play the tones, rejoin. */
@@ -94,7 +114,7 @@ export async function pressKeys(callSessionId: string, digits: string): Promise<
   try {
     await twilio()
       .calls(carrierSid)
-      .update({ twiml: carrierConferenceTwiml(meta.keypad_conference, meta.time_limit_seconds ?? 3600, digits) });
+      .update({ twiml: carrierConferenceTwiml(meta.keypad_conference, meta.time_limit_seconds ?? 3600, toneSequence(digits)) });
     return { ok: true };
   } catch (err) {
     logger.error('Keypad press failed', { callSessionId, twilioCallSid: carrierSid, error: err, errorCategory: 'twilio_api' });

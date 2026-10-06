@@ -30,6 +30,25 @@ const speakerConfig: Record<Speaker, { label: string; color: string; icon: React
   },
 };
 
+const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Older calls stored each growing caption update as its own segment ("For", "For claims", "For claims, press one").
+ * Keep only the last, longest version of a run from the same speaker.
+ */
+function collapseGrowingCaptions(sorted: TranscriptSegment[]): TranscriptSegment[] {
+  const out: TranscriptSegment[] = [];
+  for (const seg of sorted) {
+    const prev = out[out.length - 1];
+    if (prev && prev.speaker === seg.speaker && normalize(seg.text).startsWith(normalize(prev.text))) {
+      out[out.length - 1] = { ...seg, startTimeMs: prev.startTimeMs };
+      continue;
+    }
+    out.push(seg);
+  }
+  return out;
+}
+
 interface TranscriptViewerProps {
   segments: TranscriptSegment[];
   highlightedSegmentIds?: string[];
@@ -45,7 +64,9 @@ export function TranscriptViewer({
   const [speakerFilter, setSpeakerFilter] = useState<Speaker | 'all'>('all');
 
   const filteredSegments = useMemo(() => {
-    let filtered = segments.filter((s) => s.isFinal);
+    let filtered = collapseGrowingCaptions(
+      segments.filter((s) => s.isFinal).sort((a, b) => a.sequenceNumber - b.sequenceNumber),
+    );
 
     if (speakerFilter !== 'all') {
       filtered = filtered.filter((s) => s.speaker === speakerFilter);

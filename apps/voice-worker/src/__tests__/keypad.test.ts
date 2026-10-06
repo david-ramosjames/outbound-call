@@ -13,7 +13,7 @@ vi.mock('../lib/supabase.js', () => ({
   },
 }));
 
-const { carrierConferenceTwiml, conferenceName, KEYPAD_DIGITS, pressKeys } = await import('../services/keypad.js');
+const { carrierConferenceTwiml, conferenceName, KEYPAD_DIGITS, pressKeys, toneSequence } = await import('../services/keypad.js');
 const { getToolDefinitions } = await import('../services/grok-tools.js');
 
 describe('keypad mode', () => {
@@ -27,6 +27,11 @@ describe('keypad mode', () => {
 
     const withDigits = carrierConferenceTwiml(room, 1920, '4');
     expect(withDigits.indexOf('<Play digits="4"/>')).toBeLessThan(withDigits.indexOf('<Dial'));
+  });
+
+  it('leads every key press with a 1 s pause so the first tone is not lost', () => {
+    expect(toneSequence('1')).toBe('ww1');
+    expect(toneSequence('12W3#')).toBe('ww12w3#');
   });
 
   it('accepts only keypad characters', () => {

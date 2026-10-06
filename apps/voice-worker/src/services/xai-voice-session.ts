@@ -15,6 +15,9 @@ import { acceptCall, buildRealtimeSession, openRealtimeSocket, voiceFor } from '
 import { endKeypadConference, keypadConferenceFor } from './keypad.js';
 import type { CallMission, VoiceProvider, VoiceSettings } from '@outbound-call/shared';
 
+const normalizeCaption = (text: string) =>
+  text.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
 interface TranscriptAccumulator {
   responseId: string;
   text: string;
@@ -30,7 +33,10 @@ export class XaiVoiceSession {
   private maxDurationTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionStartMs = 0;
   private disconnecting = false;
+  private lastRepSegment: { id: string; itemId: string | null; text: string; seq: number } | null = null;
   private greetingSent = false;
+  private keypadMode = false;
+  private repHasSpoken = false;
   private pendingGreeting = false;
 
   constructor(
@@ -99,6 +105,7 @@ export class XaiVoiceSession {
           xaiCallId: callId,
         });
 
+        this.keypadMode = vs.keypadEnabled;
         this.sendSessionUpdate(mission, vs);
         // Defer spoken greeting until session.updated confirms config applied.
         this.pendingGreeting = true;
@@ -227,6 +234,19 @@ export class XaiVoiceSession {
     if (this.greetingSent || this.disconnecting) return;
     this.greetingSent = true;
     this.pendingGreeting = false;
+    // Keypad mode: xAI connects ~1 s before Twilio has joined the AI leg to the conference.
+    if (this.keypadMode) {
+      setTimeout(() => {
+        // If they already spoke, the AI is answering them; a second response.create would overlap it.
+        if (!this.repHasSpoken) this.requestGreeting();
+      }, 1500);
+      return;
+    }
+    this.requestGreeting();
+  }
+
+  private requestGreeting(): void {
+    if (this.disconnecting) return;
 
     // Do not send OpenAI-only `modalities` — xAI SIP sessions reject unknown fields.
     this.send({
@@ -290,6 +310,7 @@ export class XaiVoiceSession {
         break;
 
       case 'input_audio_buffer.speech_started':
+        this.repHasSpoken = true;
         this.emitCallEvent('representative_speech_started', {});
         break;
 
@@ -351,17 +372,30 @@ export class XaiVoiceSession {
     const transcript = event.transcript as string;
     if (!transcript?.trim()) return;
 
-    const seq = ++this.transcriptSeq;
     const endMs = Date.now() - this.sessionStartMs;
-    const startMs = Math.max(0, endMs - 3000);
+    const itemId = typeof event.item_id === 'string' ? event.item_id : null;
 
-    await this.saveTranscriptSegment(
-      'insurance_representative',
-      transcript,
-      seq,
-      startMs,
-      endMs
-    );
+    // xAI can send "completed" repeatedly for one utterance, each time with more words. Update that row instead
+    // of adding a new one.
+    const last = this.lastRepSegment;
+    const sameUtterance =
+      last &&
+      this.transcriptSeq === last.seq &&
+      ((itemId && itemId === last.itemId) || normalizeCaption(transcript).startsWith(normalizeCaption(last.text)));
+    if (last && sameUtterance) {
+      last.text = transcript;
+      last.itemId = itemId ?? last.itemId;
+      const { error } = await supabase
+        .from('call_transcript_segments')
+        .update({ text: transcript, end_time_ms: endMs })
+        .eq('id', last.id);
+      if (!error) return;
+    }
+
+    const seq = ++this.transcriptSeq;
+    const startMs = Math.max(0, endMs - 3000);
+    const id = await this.saveTranscriptSegment('insurance_representative', transcript, seq, startMs, endMs);
+    this.lastRepSegment = id ? { id, itemId, text: transcript, seq } : null;
   }
 
   private async handleFunctionCall(
@@ -403,7 +437,8 @@ export class XaiVoiceSession {
     };
 
     const result = await dispatchToolCall(name, args, ctx);
-    this.sendToolResult(callId, result);
+    // After a key press the AI should stay silent; it will reply when the phone menu speaks again.
+    this.sendToolResult(callId, result, !(name === 'press_keys' && result.includes('"keys_pressed"')));
   }
 
   private handleResponseDone(event: Record<string, unknown>): void {
@@ -425,7 +460,7 @@ export class XaiVoiceSession {
     });
   }
 
-  private sendToolResult(callId: string, result: string): void {
+  private sendToolResult(callId: string, result: string, respond = true): void {
     this.send({
       type: 'conversation.item.create',
       item: {
@@ -435,9 +470,11 @@ export class XaiVoiceSession {
       },
     });
 
-    this.send({
-      type: 'response.create',
-    });
+    if (respond) {
+      this.send({
+        type: 'response.create',
+      });
+    }
   }
 
   async disconnect(reason?: string): Promise<void> {
@@ -532,9 +569,10 @@ export class XaiVoiceSession {
     seq: number,
     startMs: number,
     endMs: number
-  ): Promise<void> {
+  ): Promise<string | null> {
+    const id = uuidv4();
     const { error } = await supabase.from('call_transcript_segments').insert({
-      id: uuidv4(),
+      id,
       call_mission_id: this.missionId,
       call_session_id: this.callSessionId,
       speaker,
@@ -556,7 +594,7 @@ export class XaiVoiceSession {
         errorDetails: error.details,
         errorHint: error.hint,
       });
-      return;
+      return null;
     }
 
     logger.info('Saved transcript segment', {
@@ -566,6 +604,7 @@ export class XaiVoiceSession {
       sequenceNumber: seq,
       chars: text.length,
     });
+    return id;
   }
 
   private async updateSessionStatus(status: string): Promise<void> {

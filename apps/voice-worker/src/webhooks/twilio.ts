@@ -6,7 +6,15 @@ import { logger } from '../utils/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { handleTwilioWebhook } from '../services/twilio-webhook-handler.js';
 import { resolveProvider, sipUriFor } from '../services/realtime-provider.js';
-import { carrierConferenceTwiml, conferenceName, endKeypadConference, saveKeypadMetadata, startAiLeg } from '../services/keypad.js';
+import {
+  carrierConferenceTwiml,
+  clearKeypadMetadata,
+  conferenceName,
+  endKeypadConference,
+  redirectCall,
+  saveKeypadMetadata,
+  startAiLeg,
+} from '../services/keypad.js';
 
 export const twilioRouter: RouterType = Router();
 
@@ -46,37 +54,38 @@ twilioRouter.post(
       sipUriPreview: sipUri.slice(0, 160),
     });
 
-    const vs = vsRow as { keypad_enabled?: boolean; maximum_call_duration_seconds?: number } | null;
-    if (vs?.keypad_enabled === true && missionId && config.VOICE_MODE === 'live') {
-      const keypadTwiml = await startKeypadBridge(req, missionId, sipUri, vs.maximum_call_duration_seconds);
-      if (keypadTwiml) {
-        res.status(200).set('Content-Type', 'text/xml').send(keypadTwiml);
-        return;
-      }
-    }
-
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+    const directTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial answerOnBridge="true" timeout="60">
     <Sip>${escapeXml(sipUri)}</Sip>
   </Dial>
 </Response>`;
 
-    res.status(200).set('Content-Type', 'text/xml').send(twiml);
+    const vs = vsRow as { keypad_enabled?: boolean; maximum_call_duration_seconds?: number } | null;
+    const carrierSid = typeof req.body?.CallSid === 'string' ? req.body.CallSid : '';
+    if (vs?.keypad_enabled === true && missionId && carrierSid && config.VOICE_MODE === 'live') {
+      const room = conferenceName(missionId);
+      const timeLimitSeconds = Math.min(Math.max((vs.maximum_call_duration_seconds ?? 1800) + 120, 300), 14400);
+      // Answer Twilio right away; the AI leg is dialed in parallel so the carrier isn't left waiting on our API calls.
+      res.status(200).set('Content-Type', 'text/xml').send(carrierConferenceTwiml(room, timeLimitSeconds));
+      void startKeypadAiLeg({ missionId, carrierSid, sipUri, room, timeLimitSeconds, directTwiml });
+      return;
+    }
+
+    res.status(200).set('Content-Type', 'text/xml').send(directTwiml);
   }
 );
 
-/**
- * Keypad mode: dial the AI into a conference and return TwiML that puts the carrier in the same room.
- * Returns null (caller falls back to the direct SIP bridge) if anything fails.
- */
-async function startKeypadBridge(
-  req: Request,
-  missionId: string,
-  sipUri: string,
-  maxCallSeconds: number | undefined,
-): Promise<string | null> {
-  const carrierSid = typeof req.body?.CallSid === 'string' ? req.body.CallSid : '';
+/** Keypad mode: dial the AI into the conference. If that fails, move the carrier back to the direct SIP bridge. */
+async function startKeypadAiLeg(input: {
+  missionId: string;
+  carrierSid: string;
+  sipUri: string;
+  room: string;
+  timeLimitSeconds: number;
+  directTwiml: string;
+}): Promise<void> {
+  const { missionId, carrierSid, sipUri, room, timeLimitSeconds, directTwiml } = input;
   const { data: session } = await supabase
     .from('call_sessions')
     .select('id')
@@ -84,20 +93,17 @@ async function startKeypadBridge(
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!session?.id) {
-    logger.warn('Keypad mode: no call session for mission; using direct bridge', { missionId });
-    return null;
-  }
-  const room = conferenceName(missionId);
-  const timeLimitSeconds = Math.min(Math.max((maxCallSeconds ?? 1800) + 120, 300), 14400);
   try {
+    if (session?.id) await saveKeypadMetadata(session.id, { keypad_conference: room, time_limit_seconds: timeLimitSeconds });
     const aiCallSid = await startAiLeg({ sipUri, room, missionId, timeLimitSeconds });
-    await saveKeypadMetadata(session.id, { keypad_conference: room, ai_call_sid: aiCallSid, time_limit_seconds: timeLimitSeconds });
+    if (session?.id) await saveKeypadMetadata(session.id, { keypad_conference: room, ai_call_sid: aiCallSid, time_limit_seconds: timeLimitSeconds });
     logger.info('Keypad mode: carrier and AI joined via conference', { missionId, twilioCallSid: carrierSid, aiCallSid });
-    return carrierConferenceTwiml(room, timeLimitSeconds);
   } catch (err) {
-    logger.error('Keypad mode: could not start AI leg; using direct bridge', { missionId, error: err, errorCategory: 'twilio_api' });
-    return null;
+    logger.error('Keypad mode: could not start AI leg; switching to direct bridge', { missionId, error: err, errorCategory: 'twilio_api' });
+    if (session?.id) await clearKeypadMetadata(session.id);
+    await redirectCall(carrierSid, directTwiml).catch((e) =>
+      logger.error('Keypad mode: fallback redirect failed', { missionId, error: e, errorCategory: 'twilio_api' }),
+    );
   }
 }
 

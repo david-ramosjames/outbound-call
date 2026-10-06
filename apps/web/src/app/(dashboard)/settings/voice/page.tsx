@@ -47,6 +47,7 @@ export default function VoiceSettingsPage() {
   const [keypadColumn, setKeypadColumn] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadSettings = useCallback(async () => {
@@ -93,13 +94,19 @@ export default function VoiceSettingsPage() {
       ...(keypadColumn ? { keypad_enabled: settings.keypad_enabled === true } : {}),
     };
 
-    if (settings.id) {
-      await supabase.from('voice_settings').update(fields).eq('id', settings.id);
-    } else {
-      await supabase.from('voice_settings').insert(fields);
-    }
+    const { data: written, error } = settings.id
+      ? await supabase.from('voice_settings').update(fields).eq('id', settings.id).select('id')
+      : await supabase.from('voice_settings').insert(fields).select('id');
 
     setSaving(false);
+    if (error || !written || written.length === 0) {
+      setSaveError(
+        error?.message ??
+          'Nothing was saved. Your account may not be allowed to edit voice settings. Run migration 20240101000013_voice_settings_admin_update.sql and make sure you are an admin.'
+      );
+      return;
+    }
+    setSaveError(null);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -340,6 +347,7 @@ export default function VoiceSettingsPage() {
             Settings saved successfully.
           </span>
         )}
+        {saveError && <span className="text-sm text-red-600 font-medium">{saveError}</span>}
       </div>
     </div>
   );

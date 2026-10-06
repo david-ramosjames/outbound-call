@@ -14,6 +14,16 @@ const envSchema = z.object({
   XAI_REALTIME_URL: z.string().url().default('wss://api.x.ai/v1/realtime'),
   XAI_SUMMARY_MODEL: z.string().default('grok-4'),
   XAI_INBOUND_SIM_MODEL: z.string().default('grok-4'),
+  // OpenAI Realtime (optional; only needed when a line or outbound is switched to OpenAI in settings)
+  OPENAI_API_KEY: z.string().default(''),
+  /** Project id (proj_...) from platform.openai.com > Settings > Project > General; the SIP address uses it. */
+  OPENAI_PROJECT_ID: z.string().default(''),
+  /** Signing secret (whsec_...) of the project webhook for realtime.call.incoming. */
+  OPENAI_WEBHOOK_SECRET: z.string().default(''),
+  OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime-2.1'),
+  OPENAI_TRANSCRIBE_MODEL: z.string().default('gpt-4o-transcribe'),
+  /** Text model for the inbound Test Agent when a line uses OpenAI. */
+  OPENAI_TEXT_MODEL: z.string().default('gpt-4.1'),
   INBOUND_CONTRACT_WEBHOOK_SECRET: z.string().default(''),
   SIGNFLOW_INTAKE_TOKEN: z.string().default(''),
 

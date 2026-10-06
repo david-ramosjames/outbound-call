@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { handleTwilioWebhook } from '../services/twilio-webhook-handler.js';
+import { resolveProvider, sipUriFor } from '../services/realtime-provider.js';
 
 export const twilioRouter: RouterType = Router();
 
@@ -27,9 +28,12 @@ twilioRouter.post(
       correlationToken = mission?.correlation_token || missionId;
     }
 
+    const { data: vsRow } = await supabase.from('voice_settings').select('*').limit(1).maybeSingle();
+    const provider = resolveProvider((vsRow as { voice_provider?: string } | null)?.voice_provider);
+
     // Twilio forwards custom X-headers most reliably as SIP URI query params.
     // Nested <Header> is also included as a backup.
-    const sipUri = appendSipParams(config.XAI_SIP_URI, {
+    const sipUri = appendSipParams(sipUriFor(provider), {
       'X-Correlation-Token': correlationToken,
       'X-Mission-Id': missionId,
     });
@@ -37,6 +41,7 @@ twilioRouter.post(
     logger.info('TwiML SIP bridge URI prepared', {
       missionId,
       correlationToken,
+      provider,
       sipUriPreview: sipUri.slice(0, 160),
     });
 

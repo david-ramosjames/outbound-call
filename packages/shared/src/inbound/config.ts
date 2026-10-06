@@ -67,7 +67,11 @@ export const routingSchema = z.object({
   record_calls: z.boolean().default(false),
   sms_from_number: z.string().default(''),
   max_call_seconds: z.number().int().min(60).max(7200).default(1800),
+  /** Grok voice id (used when voice_provider is xai). */
   voice: z.string().default('ara'),
+  voice_provider: z.enum(['xai', 'openai']).default('xai'),
+  /** OpenAI voice id (used when voice_provider is openai). */
+  openai_voice: z.string().default('marin'),
 });
 export type RoutingConfig = z.infer<typeof routingSchema>;
 

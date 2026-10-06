@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { OPENAI_REALTIME_VOICES } from './map-mission.js';
 
 const XAI_BASE = 'https://api.x.ai/v1';
 const CACHE_MS = 10 * 60 * 1000;
@@ -107,6 +108,32 @@ export async function listXaiVoices(force = false): Promise<{ voices: XaiVoice[]
       live: false,
     };
   }
+}
+
+const OPENAI_RECOMMENDED = 'Recommended by OpenAI for the most natural speech.';
+
+/** OpenAI has no voice-list endpoint; these are the voices its Realtime API accepts. */
+export function listOpenaiVoices(): XaiVoice[] {
+  return OPENAI_REALTIME_VOICES.map((id) => ({
+    id,
+    name: capitalize(id),
+    language: 'en',
+    custom: false,
+    description: id === 'marin' || id === 'cedar' ? OPENAI_RECOMMENDED : null,
+    gender: null,
+  }));
+}
+
+export async function previewOpenaiVoice(voiceId: string, text: string): Promise<Buffer> {
+  if (!config.OPENAI_API_KEY.trim()) throw new Error('OPENAI_API_KEY is not set on the voice worker');
+  const res = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${config.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice: voiceId, input: text, response_format: 'mp3' }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`OpenAI TTS returned ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
 }
 
 /** Short MP3 sample of a voice, for previewing in the dashboard. */

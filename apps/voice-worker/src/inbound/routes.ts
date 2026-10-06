@@ -13,7 +13,8 @@ import {
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
-import { listXaiVoices, previewXaiVoice } from '../services/xai-voices.js';
+import { listOpenaiVoices, listXaiVoices, previewOpenaiVoice, previewXaiVoice } from '../services/xai-voices.js';
+import { openaiConfigured } from '../services/realtime-provider.js';
 import { signflowFetch } from './contract-service.js';
 import { finalizeInboundCall } from './finalize.js';
 import { runSimulationTurn, simulateRequestSchema } from './simulate.js';
@@ -88,7 +89,7 @@ inboundRouter.post('/webhooks/inbound/twilio/voice', async (req: Request, res: R
         data: { business_status: business.status, forwarded_from: body.ForwardedFrom ?? null, line: line.slug || null },
       },
     );
-    sendTwiml(res, sipBridgeTwiml(created.callId));
+    sendTwiml(res, sipBridgeTwiml(created.callId, false, inbound.routing.voice_provider));
   } catch (err) {
     logger.error('Inbound voice webhook failed', { error: err, twilioCallSid: body.CallSid });
     sendTwiml(res, fallbackTwiml(inbound));
@@ -177,7 +178,7 @@ inboundRouter.post('/webhooks/inbound/twilio/transfer-result', async (req: Reque
   state.status = deriveIntakeStatus(state);
   await saveIntakeState(state);
   await updateInboundCall(callId, { transfer_status: 'failed', status: 'in_progress' });
-  sendTwiml(res, sipBridgeTwiml(callId, true));
+  sendTwiml(res, sipBridgeTwiml(callId, true, settings.config.routing.voice_provider));
 });
 
 // ---------- Whisper to the staff member who answers a transfer ----------
@@ -303,12 +304,17 @@ inboundRouter.get('/internal/inbound/env-status', async (req: Request, res: Resp
       VOICE_WORKER_BASE_URL: base.startsWith('https://'),
       APP_BASE_URL: !config.APP_BASE_URL.includes('localhost'),
       SIGNFLOW_INTAKE_TOKEN: set(config.SIGNFLOW_INTAKE_TOKEN),
+      OPENAI_API_KEY: set(config.OPENAI_API_KEY),
+      OPENAI_PROJECT_ID: set(config.OPENAI_PROJECT_ID),
+      OPENAI_WEBHOOK_SECRET: set(config.OPENAI_WEBHOOK_SECRET),
       INBOUND_CONTRACT_WEBHOOK_SECRET: set(config.INBOUND_CONTRACT_WEBHOOK_SECRET),
     },
     urls: {
       voice: `${base}/webhooks/inbound/twilio/voice`,
       status: `${base}/webhooks/inbound/twilio/status`,
       signflowCallback: `${base}/webhooks/inbound/contracts/signflow`,
+      xaiWebhook: `${base}/webhooks/xai/sip`,
+      openaiWebhook: `${base}/webhooks/openai/sip`,
     },
     integrations,
     lines: (await listActiveLines()).map((l) => ({ id: l.id, name: l.name, phone_numbers: l.phone_numbers, is_default: l.is_default })),
@@ -343,21 +349,32 @@ inboundRouter.get('/internal/inbound/signflow/templates/:id', async (req: Reques
 
 // ---------- xAI voices (shared by outbound and inbound settings) ----------
 
+/** Which voice providers have their keys set on the worker. */
+inboundRouter.get('/internal/voices/providers', (req: Request, res: Response): void => {
+  if (rejectInternal(req, res)) return;
+  res.json({ xai: Boolean(config.XAI_API_KEY.trim()), openai: openaiConfigured() });
+});
+
 inboundRouter.get('/internal/voices', async (req: Request, res: Response): Promise<void> => {
   if (rejectInternal(req, res)) return;
-  res.json(await listXaiVoices(req.query.refresh === '1'));
+  if (req.query.provider === 'openai') {
+    res.json({ voices: listOpenaiVoices(), live: true, configured: openaiConfigured() });
+    return;
+  }
+  res.json({ ...(await listXaiVoices(req.query.refresh === '1')), configured: true });
 });
 
 inboundRouter.post('/internal/voices/preview', async (req: Request, res: Response): Promise<void> => {
   if (rejectInternal(req, res)) return;
   const voice = String(req.body?.voice ?? '').trim().toLowerCase();
   const text = String(req.body?.text ?? '').trim().slice(0, 300);
+  const provider = req.body?.provider === 'openai' ? 'openai' : 'xai';
   if (!/^[a-z0-9_-]{2,40}$/.test(voice) || !text) {
     res.status(400).json({ error: 'voice and text are required' });
     return;
   }
   try {
-    const audio = await previewXaiVoice(voice, text);
+    const audio = provider === 'openai' ? await previewOpenaiVoice(voice, text) : await previewXaiVoice(voice, text);
     res.json({ mime: 'audio/mpeg', audio: audio.toString('base64') });
   } catch (err) {
     logger.warn('Voice preview failed', { voice, error: err });

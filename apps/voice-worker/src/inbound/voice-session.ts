@@ -13,10 +13,10 @@ import {
   type AgreementStatus,
   type InboundIntakeState,
   type InboundRuntime,
+  type VoiceProvider,
 } from '@outbound-call/shared';
-import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
-import { normalizeXaiVoice } from '../services/map-mission.js';
+import { acceptCall, buildRealtimeSession, openRealtimeSocket } from '../services/realtime-provider.js';
 import { finalizeInboundCall } from './finalize.js';
 import { createLiveRuntime } from './runtime.js';
 import { getInboundCall, loadIntakeForCall, loadLineSettings, saveTranscript, updateInboundCall, updateTranscript, type InboundCallRow } from './store.js';
@@ -66,10 +66,11 @@ export class InboundVoiceSession {
     private readonly callId: string,
     private readonly xaiCallId: string,
     private readonly resumed: boolean,
+    private readonly provider: VoiceProvider = 'xai',
   ) {}
 
   private get logCtx() {
-    return { inboundCallId: this.callId, xaiCallId: this.xaiCallId };
+    return { inboundCallId: this.callId, xaiCallId: this.xaiCallId, provider: this.provider };
   }
 
   async start(): Promise<void> {
@@ -98,12 +99,16 @@ export class InboundVoiceSession {
       ...(call.answered_at ? {} : { answered_at: new Date().toISOString() }),
     });
 
-    this.ws = new WebSocket(`${config.XAI_REALTIME_URL}?call_id=${encodeURIComponent(this.xaiCallId)}`, {
-      headers: { Authorization: `Bearer ${config.XAI_API_KEY}` },
-    });
+    // OpenAI keeps the SIP leg ringing until we accept it; if it refuses, Twilio's dial fails over to fallback routing.
+    if (!(await acceptCall(this.provider, this.xaiCallId, this.buildSession()))) {
+      activeSessions.delete(this.callId);
+      return;
+    }
+
+    this.ws = openRealtimeSocket(this.provider, this.xaiCallId);
 
     this.ws.on('open', () => {
-      logger.info('Inbound xAI WebSocket connected', this.logCtx);
+      logger.info('Inbound realtime WebSocket connected', this.logCtx);
       this.sendSessionUpdate();
       setTimeout(() => this.sendGreeting(), 2500);
       this.maxTimer = setTimeout(() => {
@@ -140,7 +145,7 @@ export class InboundVoiceSession {
     });
   }
 
-  private sendSessionUpdate(): void {
+  private buildSession(): Record<string, unknown> {
     const business = businessStatusFor(this.runtime);
     const ctx = {
       instructions: this.runtime.instructions,
@@ -151,19 +156,17 @@ export class InboundVoiceSession {
       resumedAfterTransfer: this.resumed,
     };
     const greeting = buildInboundGreeting(ctx);
-    const instructions = `${buildInboundInstructions(ctx)}\n\n# Opening line\nStart the call by saying exactly: "${greeting}"`;
-
-    this.send({
-      type: 'session.update',
-      session: {
-        instructions,
-        tools: getInboundToolDefinitions(),
-        voice: normalizeXaiVoice(this.runtime.config.routing.voice),
-        turn_detection: { type: 'server_vad' },
-        audio: { input: { transcription: { model: 'grok-transcribe' } } },
-      },
+    const routing = this.runtime.config.routing;
+    return buildRealtimeSession(this.provider, {
+      instructions: `${buildInboundInstructions(ctx)}\n\n# Opening line\nStart the call by saying exactly: "${greeting}"`,
+      tools: getInboundToolDefinitions(),
+      voice: this.provider === 'openai' ? routing.openai_voice : routing.voice,
     });
-    void updateInboundCall(this.callId, { business_status: business.status, language: this.state.language });
+  }
+
+  private sendSessionUpdate(): void {
+    this.send({ type: 'session.update', session: this.buildSession() });
+    void updateInboundCall(this.callId, { business_status: businessStatusFor(this.runtime).status, language: this.state.language });
   }
 
   private sendGreeting(): void {

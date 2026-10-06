@@ -1,3 +1,4 @@
+import type { VoiceProvider } from '@outbound-call/shared';
 import { logger } from '../utils/logger.js';
 import { INBOUND_CALL_HEADER, INBOUND_RESUME_HEADER } from './telephony.js';
 import { InboundVoiceSession } from './voice-session.js';
@@ -33,16 +34,16 @@ function findParam(entries: Array<[string, string]>, name: string): string | und
  * Inbound calls are tagged with X-Inbound-Call-Id when bridged to xAI.
  * Returns true if the call was inbound (and handled), false to let the outbound flow continue untouched.
  */
-export function tryHandleInboundXaiCall(payload: Record<string, unknown>, xaiCallId: string): boolean {
+export function tryHandleInboundXaiCall(payload: Record<string, unknown>, xaiCallId: string, provider: VoiceProvider = 'xai'): boolean {
   const entries = headerValues(payload);
   const rawId = findParam(entries, INBOUND_CALL_HEADER);
   const callId = rawId?.match(UUID)?.[0];
   if (!callId) return false;
 
   const resumed = findParam(entries, INBOUND_RESUME_HEADER) === '1';
-  logger.info('xAI call routed to inbound intake', { inboundCallId: callId, xaiCallId, resumed });
+  logger.info('Realtime call routed to inbound intake', { inboundCallId: callId, xaiCallId, resumed, provider });
 
-  const session = new InboundVoiceSession(callId, xaiCallId, resumed);
+  const session = new InboundVoiceSession(callId, xaiCallId, resumed, provider);
   session.start().catch((err) => {
     logger.error('Failed to start inbound voice session', { inboundCallId: callId, xaiCallId, error: err, errorCategory: 'xai_session' });
   });

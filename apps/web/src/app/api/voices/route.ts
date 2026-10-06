@@ -4,10 +4,13 @@ import { workerFetch } from '@/lib/voice-worker';
 
 export const dynamic = 'force-dynamic';
 
-/** xAI voices (built-in + this team's custom voices), via the voice worker. */
+/** Voices for a provider (Grok: built-in + this team's custom voices; OpenAI: its realtime voices), via the voice worker. */
 export async function GET(req: NextRequest) {
   const auth = await requireStaff();
   if (!auth.ok) return auth.response;
-  const refresh = req.nextUrl.searchParams.get('refresh') === '1' ? '?refresh=1' : '';
-  return workerFetch(`/internal/voices${refresh}`, { timeoutMs: 15_000 });
+  const params = new URLSearchParams();
+  if (req.nextUrl.searchParams.get('provider') === 'openai') params.set('provider', 'openai');
+  if (req.nextUrl.searchParams.get('refresh') === '1') params.set('refresh', '1');
+  const qs = params.toString();
+  return workerFetch(`/internal/voices${qs ? `?${qs}` : ''}`, { timeoutMs: 15_000 });
 }

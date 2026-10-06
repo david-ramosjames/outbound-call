@@ -4,6 +4,7 @@ import Twilio from 'twilio';
 import { withFirmName, type InboundConfig, type TransferTarget } from '@outbound-call/shared';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { resolveProvider, sipUriFor } from '../services/realtime-provider.js';
 
 let client: ReturnType<typeof Twilio> | null = null;
 function twilioClient() {
@@ -41,9 +42,9 @@ export function twiml(body: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${body}\n</Response>`;
 }
 
-/** Bridge the caller to Grok Voice over SIP. If the AI leg can't connect, the action URL falls back to a human. */
-export function sipBridgeTwiml(inboundCallId: string, resume = false): string {
-  const sipUri = appendSipParams(config.XAI_SIP_URI, {
+/** Bridge the caller to the line's voice AI over SIP. If the AI leg can't connect, the action URL falls back to a human. */
+export function sipBridgeTwiml(inboundCallId: string, resume = false, voiceProvider?: string): string {
+  const sipUri = appendSipParams(sipUriFor(resolveProvider(voiceProvider)), {
     [INBOUND_CALL_HEADER]: inboundCallId,
     ...(resume ? { [INBOUND_RESUME_HEADER]: '1' } : {}),
   });

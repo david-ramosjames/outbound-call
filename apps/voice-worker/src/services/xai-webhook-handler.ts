@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
 import { XaiVoiceSession } from './xai-voice-session.js';
 import { mapDbMissionToCallMission } from './map-mission.js';
+import type { VoiceProvider } from '@outbound-call/shared';
 
 interface XaiSipHeader {
   name: string;
@@ -37,6 +38,7 @@ export function verifyXaiSignature(
   signature: string,
   webhookId?: string,
   webhookTimestamp?: string,
+  secret: string = config.XAI_SIP_WEBHOOK_SECRET,
 ): boolean {
   try {
     const isStandardFormat = /(?:^|\s)v1,/.test(signature);
@@ -56,11 +58,12 @@ export function verifyXaiSignature(
         signature,
         webhookId,
         webhookTimestamp,
+        secret,
       );
     }
 
     const expected = crypto
-      .createHmac('sha256', config.XAI_SIP_WEBHOOK_SECRET)
+      .createHmac('sha256', secret)
       .update(rawBody)
       .digest('hex');
 
@@ -99,8 +102,9 @@ function verifyStandardWebhookSignature(
   signatureHeader: string,
   webhookId: string,
   webhookTimestamp: string,
+  secret: string,
 ): boolean {
-  const normalizedSecret = normalizeWebhookSecret(config.XAI_SIP_WEBHOOK_SECRET);
+  const normalizedSecret = normalizeWebhookSecret(secret);
   const secretKeys = uniqueBuffers([
     decodeWebhookSecret(normalizedSecret),
     // Fallbacks for common Railway/env mangling of + and trailing /
@@ -192,35 +196,55 @@ function uniqueBuffers(bufs: Buffer[]): Buffer[] {
   return out;
 }
 
+/** Calls already handed to a session; webhook providers retry and may deliver the same call twice. */
+const handledCalls = new Map<string, number>();
+
+function alreadyHandled(callId: string): boolean {
+  const now = Date.now();
+  for (const [id, at] of handledCalls) if (now - at > 10 * 60 * 1000) handledCalls.delete(id);
+  if (handledCalls.has(callId)) return true;
+  handledCalls.set(callId, now);
+  return false;
+}
+
+/** realtime.call.incoming from Grok (/webhooks/xai/sip) or OpenAI (/webhooks/openai/sip); same payload shape. */
 export async function handleXaiWebhook(
-  payload: XaiSipWebhookPayload
+  payload: XaiSipWebhookPayload,
+  provider: VoiceProvider = 'xai',
 ): Promise<void> {
   const eventType = payload.type ?? payload.event;
   const xaiCallId = payload.data?.call_id ?? payload.call_id;
 
-  logger.info('xAI SIP webhook received', {
+  logger.info('Realtime SIP webhook received', {
+    provider,
     eventType,
     xaiCallId,
     webhookEventId: payload.id,
   });
 
   if (eventType !== 'realtime.call.incoming') {
-    logger.info(`Ignoring xAI event: ${eventType ?? 'unknown'}`, { xaiCallId });
+    logger.info(`Ignoring ${provider} event: ${eventType ?? 'unknown'}`, { xaiCallId });
     return;
   }
 
   if (!xaiCallId) {
-    logger.error('xAI incoming webhook missing call_id', {
+    logger.error('Realtime incoming webhook missing call_id', {
+      provider,
       eventType,
       payloadKeys: Object.keys(payload),
     });
     return;
   }
 
+  if (alreadyHandled(`${provider}:${xaiCallId}`)) {
+    logger.info('Duplicate incoming-call webhook ignored', { provider, xaiCallId });
+    return;
+  }
+
   // Inbound intake calls carry their own header; must run before the outbound recent-mission fallback.
   try {
     const { tryHandleInboundXaiCall } = await import('../inbound/xai-branch.js');
-    if (tryHandleInboundXaiCall(payload, xaiCallId)) return;
+    if (tryHandleInboundXaiCall(payload, xaiCallId, provider)) return;
   } catch (err) {
     logger.error('Inbound xAI routing check failed', { xaiCallId, error: err });
   }
@@ -296,7 +320,7 @@ export async function handleXaiWebhook(
     .update({ status: 'in_progress' })
     .eq('id', missionId);
 
-  const voiceSession = new XaiVoiceSession(missionId, session.id);
+  const voiceSession = new XaiVoiceSession(missionId, session.id, provider);
   voiceSession.connect(xaiCallId, mission).catch((err) => {
     logger.error('Failed to start xAI voice session', {
       missionId,

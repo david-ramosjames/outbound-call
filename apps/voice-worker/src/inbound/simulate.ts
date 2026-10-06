@@ -18,6 +18,7 @@ import {
   newIntakeState,
   type InboundConfig,
   type InboundIntakeState,
+  type VoiceProvider,
 } from '@outbound-call/shared';
 import { config } from '../config.js';
 import { loadLineSettings } from './store.js';
@@ -71,12 +72,13 @@ function withAllActions(cfg: InboundConfig): InboundConfig {
   });
 }
 
-async function chatCompletion(messages: Array<Record<string, unknown>>) {
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
+async function chatCompletion(messages: Array<Record<string, unknown>>, provider: VoiceProvider) {
+  const openai = provider === 'openai';
+  const res = await fetch(openai ? 'https://api.openai.com/v1/chat/completions' : 'https://api.x.ai/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${config.XAI_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${openai ? config.OPENAI_API_KEY : config.XAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: config.XAI_INBOUND_SIM_MODEL,
+      model: openai ? config.OPENAI_TEXT_MODEL : config.XAI_INBOUND_SIM_MODEL,
       temperature: 0.4,
       messages,
       tools: getInboundChatToolDefinitions(),
@@ -84,7 +86,7 @@ async function chatCompletion(messages: Array<Record<string, unknown>>) {
     }),
     signal: AbortSignal.timeout(90_000),
   });
-  if (!res.ok) throw new Error(`xAI responded ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw new Error(`${openai ? 'OpenAI' : 'xAI'} responded ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ChatMessage['tool_calls'] } }> };
   return json.choices?.[0]?.message ?? { content: '' };
 }
@@ -93,6 +95,8 @@ export async function runSimulationTurn(req: SimulateRequest) {
   const settings = await loadLineSettings(req.lineId, true);
   const cfg = req.overrides.enableAllActions ? withAllActions(settings.config) : settings.config;
   const outcome = req.overrides.transferOutcome ?? 'connected';
+  const provider: VoiceProvider =
+    settings.config.routing.voice_provider === 'openai' && config.OPENAI_API_KEY.trim() ? 'openai' : 'xai';
   const { runtime, log } = createMemoryRuntime({
     config: cfg,
     instructions: settings.instructions,
@@ -130,7 +134,7 @@ export async function runSimulationTurn(req: SimulateRequest) {
     for (let round = 0; round < 8; round += 1) {
       const business = businessStatusFor(runtime);
       const system = `${buildInboundInstructions({ instructions: runtime.instructions, config: cfg, state, business, now: runtime.now() })}\n\n# Simulation\nThis is a text simulation of a phone call. Reply with exactly what you would say out loud, nothing else.`;
-      const msg = await chatCompletion([{ role: 'system', content: system }, ...history]);
+      const msg = await chatCompletion([{ role: 'system', content: system }, ...history], provider);
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         history.push({ role: 'assistant', content: msg.content ?? null, tool_calls: msg.tool_calls });

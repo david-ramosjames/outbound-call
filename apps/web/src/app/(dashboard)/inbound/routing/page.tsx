@@ -11,7 +11,7 @@ import { Toggle } from '@/components/ui/toggle';
 import { InboundPageHeader, LoadingSpinner, SaveMessage, WarningBox, selectClass } from '@/components/inbound/page-header';
 import { useInboundSettings } from '@/components/inbound/use-inbound-settings';
 import { LinePicker, useInboundLine } from '@/components/inbound/line-context';
-import { VoicePicker } from '@/components/voice-picker';
+import { VoiceModelSettings } from '@/components/voice-picker';
 
 const DAY_LABELS: Record<Weekday, string> = { sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday' };
 const TIMEZONES = ['America/Chicago', 'America/New_York', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles'];
@@ -47,19 +47,23 @@ export default function RoutingAndHoursPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>AI Voice</CardTitle>
-          <CardDescription>The voice callers hear on this intake line. Press Preview to hear it before saving.</CardDescription>
+          <CardTitle>AI Model &amp; Voice</CardTitle>
+          <CardDescription>Which AI answers this intake line and the voice callers hear. Press play to hear a voice before saving.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <VoicePicker
+          <VoiceModelSettings
             key={lineId ?? 'default'}
-            id="inbound-voice"
-            value={r.voice}
-            onChange={(voice) => setRouting({ voice })}
+            provider={r.voice_provider}
+            onProviderChange={(voice_provider) => setRouting({ voice_provider })}
+            xaiVoice={r.voice}
+            onXaiVoiceChange={(voice) => setRouting({ voice })}
+            openaiVoice={r.openai_voice}
+            onOpenaiVoiceChange={(openai_voice) => setRouting({ openai_voice })}
             sampleText={`Thank you for calling ${config.firm_name}. My name is Ana, I'm the firm's AI intake assistant. How can I help you today?`}
+            hint="The Test Agent uses the same model as the line."
           />
           <Button onClick={() => save('routing', r)} disabled={saving === 'routing'}>
-            <Save className="h-4 w-4 mr-1.5" /> {saving === 'routing' ? 'Saving...' : 'Save voice'}
+            <Save className="h-4 w-4 mr-1.5" /> {saving === 'routing' ? 'Saving...' : 'Save model & voice'}
           </Button>
         </CardContent>
       </Card>

@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { Router as RouterType } from 'express';
+import type { VoiceProvider } from '@outbound-call/shared';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -10,9 +11,9 @@ import {
 
 export const xaiRouter: RouterType = Router();
 
-xaiRouter.post(
-  '/webhooks/xai/sip',
-  (req: Request, res: Response): void => {
+/** Both providers send realtime.call.incoming as a Standard Webhooks request; only the secret differs. */
+function sipWebhook(provider: VoiceProvider, secret: () => string) {
+  return (req: Request, res: Response): void => {
     const rawBuf = (req as Request & { rawBody?: Buffer }).rawBody;
     const rawBody =
       rawBuf?.toString('utf8') ??
@@ -26,16 +27,23 @@ xaiRouter.post(
     const standardTimestamp = headerValue(req, 'webhook-timestamp');
     const standardSignature = headerValue(req, 'webhook-signature');
     const legacySignature =
-      headerValue(req, 'x-xai-signature') ??
-      headerValue(req, 'x-webhook-signature');
+      provider === 'xai'
+        ? headerValue(req, 'x-xai-signature') ?? headerValue(req, 'x-webhook-signature')
+        : undefined;
 
     const signature = standardSignature ?? legacySignature;
 
     if (config.VOICE_MODE === 'live') {
+      if (provider === 'openai' && !secret().trim()) {
+        logger.warn('OpenAI webhook received but OPENAI_WEBHOOK_SECRET is not set');
+        res.status(503).json({ error: 'OpenAI webhook not configured' });
+        return;
+      }
+
       if (!signature) {
-        logger.warn('xAI webhook missing signature headers', {
+        logger.warn(`${provider} webhook missing signature headers`, {
           headers: Object.keys(req.headers),
-          ...webhookSecretDiagnostics(),
+          ...webhookSecretDiagnostics(secret()),
         });
         res.status(401).json({ error: 'Missing signature' });
         return;
@@ -46,17 +54,18 @@ xaiRouter.post(
         signature,
         standardId,
         standardTimestamp,
+        secret(),
       );
 
       if (!valid) {
-        logger.warn('xAI webhook signature verification failed', {
+        logger.warn(`${provider} webhook signature verification failed`, {
           hasStandardHeaders: Boolean(
             standardId && standardTimestamp && standardSignature,
           ),
           usedRawBuffer,
           bodyBytes: Buffer.byteLength(rawBody, 'utf8'),
           signaturePrefix: signature.slice(0, 6),
-          ...webhookSecretDiagnostics(),
+          ...webhookSecretDiagnostics(secret()),
         });
         res.status(401).json({ error: 'Invalid signature' });
         return;
@@ -69,14 +78,17 @@ xaiRouter.post(
     const payload =
       typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
-    handleXaiWebhook(payload).catch((err) => {
-      logger.error('xAI webhook processing error', {
+    handleXaiWebhook(payload, provider).catch((err) => {
+      logger.error(`${provider} webhook processing error`, {
         error: err,
         errorCategory: 'webhook_processing',
       });
     });
-  }
-);
+  };
+}
+
+xaiRouter.post('/webhooks/xai/sip', sipWebhook('xai', () => config.XAI_SIP_WEBHOOK_SECRET));
+xaiRouter.post('/webhooks/openai/sip', sipWebhook('openai', () => config.OPENAI_WEBHOOK_SECRET));
 
 function headerValue(req: Request, name: string): string | undefined {
   const value = req.headers[name];

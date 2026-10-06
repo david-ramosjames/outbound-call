@@ -166,6 +166,8 @@ export function mapDbVoiceSettings(
         DEFAULT_VOICE_SETTINGS.defaultVoice,
       ),
     ),
+    voiceProvider: pickStr('voiceProvider', 'voice_provider', 'xai') === 'openai' ? 'openai' : 'xai',
+    openaiVoice: normalizeOpenaiVoice(pickStr('openaiVoice', 'openai_voice', DEFAULT_VOICE_SETTINGS.openaiVoice)),
     isEnabled: pickBool('isEnabled', 'is_enabled', DEFAULT_VOICE_SETTINGS.isEnabled),
     createdAt: pickStr('createdAt', 'created_at', new Date().toISOString()),
     updatedAt: pickStr('updatedAt', 'updated_at', new Date().toISOString()),
@@ -188,4 +190,12 @@ export function normalizeXaiVoice(voice: string): string {
   if (openaiToXai[v]) return openaiToXai[v];
   // Any built-in or custom xAI voice id (they are short lowercase ids, e.g. "celeste" or "nlbqfwie").
   return /^[a-z0-9_-]{2,40}$/.test(v) ? v : 'eve';
+}
+
+/** Voices the OpenAI Realtime API accepts. */
+export const OPENAI_REALTIME_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'] as const;
+
+export function normalizeOpenaiVoice(voice: string): string {
+  const v = (voice || '').trim().toLowerCase();
+  return (OPENAI_REALTIME_VOICES as readonly string[]).includes(v) ? v : 'marin';
 }

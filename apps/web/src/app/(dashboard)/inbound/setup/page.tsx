@@ -29,6 +29,9 @@ const WORKER_VARS: EnvVar[] = [
   { key: 'XAI_AGENT_ID', need: 'required', purpose: 'xAI voice agent id.' },
   { key: 'XAI_SIP_URI', need: 'inbound', purpose: 'Where Twilio bridges the call audio to xAI.' },
   { key: 'XAI_SIP_WEBHOOK_SECRET', need: 'inbound', purpose: 'Verifies xAI call webhooks (secret).' },
+  { key: 'OPENAI_API_KEY', need: 'optional', purpose: 'Only to run calls on OpenAI instead of Grok (secret). Also used for OpenAI voice previews.' },
+  { key: 'OPENAI_PROJECT_ID', need: 'optional', purpose: 'OpenAI project id (proj_…), from platform.openai.com → Settings → Project → General. Twilio dials sip:<id>@sip.api.openai.com.' },
+  { key: 'OPENAI_WEBHOOK_SECRET', need: 'optional', purpose: 'Signing secret (whsec_…) of the OpenAI project webhook for incoming calls (URL below).' },
   { key: 'SIGNFLOW_INTAKE_TOKEN', need: 'contracts', purpose: 'Bearer token for Sign Flow, both directions. Must equal SIGNFLOW_INTAKE_TOKEN on Sign Flow.' },
   { key: 'INBOUND_CONTRACT_WEBHOOK_SECRET', need: 'optional', purpose: 'Only for non-Sign Flow e-sign tools posting signature status. Not needed with Sign Flow.' },
 ];
@@ -65,7 +68,7 @@ interface SetupData {
     error?: string;
     mode?: string;
     env?: Record<string, boolean>;
-    urls?: { voice: string; status: string; signflowCallback: string };
+    urls?: { voice: string; status: string; signflowCallback: string; xaiWebhook?: string; openaiWebhook?: string };
     lines?: Array<{ id: string; name: string; phone_numbers: string[]; is_default: boolean }>;
   };
   signflow: {
@@ -155,6 +158,10 @@ const FAQ: Array<{ q: string; a: string }> = [
   {
     q: 'How does the worker know an agreement was signed?',
     a: "Sign Flow posts to the worker's Sign Flow callback URL (sent with each request, authenticated with SIGNFLOW_INTAKE_TOKEN). While the caller is on the phone the AI also checks the status directly before confirming.",
+  },
+  {
+    q: 'How do I switch between Grok and OpenAI?',
+    a: 'Pick the AI model per intake line on Voice, Routing & Hours, and for outbound calls on Settings → Voice. Each model keeps its own voice choice. OpenAI needs OPENAI_API_KEY, OPENAI_PROJECT_ID and OPENAI_WEBHOOK_SECRET on the worker plus the OpenAI webhook below; until all three are set, calls stay on Grok even if OpenAI is selected.',
   },
   {
     q: 'Something shows TBD. What do I do?',
@@ -275,6 +282,15 @@ export default function SetupPage() {
               For reference only: nothing to paste. The worker sends this URL to Sign Flow with each agreement, and Sign Flow reports the
               signature status back to it.
             </p>
+            {worker.urls.openaiWebhook && (
+              <>
+                <CopyRow label="OpenAI webhook" value={worker.urls.openaiWebhook} />
+                <p className="text-xs text-slate-500 pl-40">
+                  Only if you use OpenAI: platform.openai.com → Settings → Project → Webhooks → Create, paste this URL, select the event
+                  &ldquo;realtime.call.incoming&rdquo;, and put the signing secret it shows in OPENAI_WEBHOOK_SECRET on the worker.
+                </p>
+              </>
+            )}
             {!worker.urls.voice.startsWith('https://') && (
               <WarningBox>VOICE_WORKER_BASE_URL on the worker is not an https URL, so Twilio and Sign Flow cannot reach it.</WarningBox>
             )}

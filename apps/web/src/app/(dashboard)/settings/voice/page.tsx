@@ -9,7 +9,7 @@ import { Toggle } from '@/components/ui/toggle';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_VOICE_SETTINGS } from '@outbound-call/shared';
-import { VoicePicker } from '@/components/voice-picker';
+import { VoiceModelSettings, type VoiceProvider } from '@/components/voice-picker';
 
 interface VoiceSettingsData {
   id?: string;
@@ -21,6 +21,8 @@ interface VoiceSettingsData {
   maximum_call_duration_seconds: number;
   maximum_hold_duration_seconds: number;
   default_voice: string;
+  voice_provider?: VoiceProvider;
+  openai_voice?: string;
   is_enabled: boolean;
 }
 
@@ -34,8 +36,12 @@ export default function VoiceSettingsPage() {
     maximum_call_duration_seconds: DEFAULT_VOICE_SETTINGS.maximumCallDurationSeconds,
     maximum_hold_duration_seconds: DEFAULT_VOICE_SETTINGS.maximumHoldDurationSeconds,
     default_voice: DEFAULT_VOICE_SETTINGS.defaultVoice,
+    voice_provider: DEFAULT_VOICE_SETTINGS.voiceProvider,
+    openai_voice: DEFAULT_VOICE_SETTINGS.openaiVoice,
     is_enabled: DEFAULT_VOICE_SETTINGS.isEnabled,
   });
+  /** False until migration 011 adds voice_provider / openai_voice to voice_settings. */
+  const [providerColumns, setProviderColumns] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -49,7 +55,14 @@ export default function VoiceSettingsPage() {
       .single();
 
     if (data) {
-      setSettings(data as VoiceSettingsData);
+      const row = data as VoiceSettingsData;
+      const hasColumns = 'voice_provider' in row;
+      setProviderColumns(hasColumns);
+      setSettings({
+        ...row,
+        voice_provider: row.voice_provider === 'openai' ? 'openai' : 'xai',
+        openai_voice: row.openai_voice || DEFAULT_VOICE_SETTINGS.openaiVoice,
+      });
     }
     setLoading(false);
   }, []);
@@ -61,34 +74,23 @@ export default function VoiceSettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     const supabase = createClient();
+    const fields = {
+      ai_disclosure_text: settings.ai_disclosure_text,
+      recording_disclosure_text: settings.recording_disclosure_text,
+      recording_enabled: settings.recording_enabled,
+      allowed_call_start_time: settings.allowed_call_start_time,
+      allowed_call_end_time: settings.allowed_call_end_time,
+      maximum_call_duration_seconds: settings.maximum_call_duration_seconds,
+      maximum_hold_duration_seconds: settings.maximum_hold_duration_seconds,
+      default_voice: settings.default_voice,
+      is_enabled: settings.is_enabled,
+      ...(providerColumns ? { voice_provider: settings.voice_provider, openai_voice: settings.openai_voice } : {}),
+    };
 
     if (settings.id) {
-      await supabase
-        .from('voice_settings')
-        .update({
-          ai_disclosure_text: settings.ai_disclosure_text,
-          recording_disclosure_text: settings.recording_disclosure_text,
-          recording_enabled: settings.recording_enabled,
-          allowed_call_start_time: settings.allowed_call_start_time,
-          allowed_call_end_time: settings.allowed_call_end_time,
-          maximum_call_duration_seconds: settings.maximum_call_duration_seconds,
-          maximum_hold_duration_seconds: settings.maximum_hold_duration_seconds,
-          default_voice: settings.default_voice,
-          is_enabled: settings.is_enabled,
-        })
-        .eq('id', settings.id);
+      await supabase.from('voice_settings').update(fields).eq('id', settings.id);
     } else {
-      await supabase.from('voice_settings').insert({
-        ai_disclosure_text: settings.ai_disclosure_text,
-        recording_disclosure_text: settings.recording_disclosure_text,
-        recording_enabled: settings.recording_enabled,
-        allowed_call_start_time: settings.allowed_call_start_time,
-        allowed_call_end_time: settings.allowed_call_end_time,
-        maximum_call_duration_seconds: settings.maximum_call_duration_seconds,
-        maximum_hold_duration_seconds: settings.maximum_hold_duration_seconds,
-        default_voice: settings.default_voice,
-        is_enabled: settings.is_enabled,
-      });
+      await supabase.from('voice_settings').insert(fields);
     }
 
     setSaving(false);
@@ -269,16 +271,23 @@ export default function VoiceSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Voice</CardTitle>
+          <CardTitle>AI Model &amp; Voice</CardTitle>
         </CardHeader>
         <CardContent>
-          <VoicePicker
-            id="voice"
-            label="Default Voice (outbound calls)"
-            value={settings.default_voice}
-            onChange={(voice) => setSettings((s) => ({ ...s, default_voice: voice }))}
+          <VoiceModelSettings
+            provider={settings.voice_provider ?? 'xai'}
+            onProviderChange={(voice_provider) => setSettings((s) => ({ ...s, voice_provider }))}
+            xaiVoice={settings.default_voice}
+            onXaiVoiceChange={(voice) => setSettings((s) => ({ ...s, default_voice: voice }))}
+            openaiVoice={settings.openai_voice ?? DEFAULT_VOICE_SETTINGS.openaiVoice}
+            onOpenaiVoiceChange={(openai_voice) => setSettings((s) => ({ ...s, openai_voice }))}
             sampleText="Hi, this is an AI assistant calling on behalf of the law firm about your case. Do you have a quick minute?"
-            hint="Inbound intake lines pick their own voice under Inbound → Voice, Routing & Hours."
+            hint="For outbound calls. Inbound intake lines pick their own model and voice under Inbound → Voice, Routing & Hours."
+            providerUnavailable={
+              providerColumns
+                ? undefined
+                : 'Outbound calls use Grok. To choose OpenAI here, run migration 20240101000011_voice_provider.sql in Supabase.'
+            }
           />
         </CardContent>
       </Card>

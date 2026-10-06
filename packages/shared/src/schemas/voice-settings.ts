@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+/** Which realtime voice model runs the call. API keys live in the voice worker env. */
+export const VOICE_PROVIDERS = ['xai', 'openai'] as const;
+export type VoiceProvider = (typeof VOICE_PROVIDERS)[number];
+export const VOICE_PROVIDER_LABELS: Record<VoiceProvider, string> = { xai: 'Grok (xAI)', openai: 'OpenAI' };
+
 export const voiceSettingsSchema = z.object({
   id: z.string().uuid(),
   aiDisclosureText: z.string(),
@@ -10,6 +15,8 @@ export const voiceSettingsSchema = z.object({
   maximumCallDurationSeconds: z.number(),
   maximumHoldDurationSeconds: z.number(),
   defaultVoice: z.string(),
+  voiceProvider: z.enum(VOICE_PROVIDERS),
+  openaiVoice: z.string(),
   isEnabled: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -26,5 +33,7 @@ export const DEFAULT_VOICE_SETTINGS = {
   maximumCallDurationSeconds: 1800,
   maximumHoldDurationSeconds: 600,
   defaultVoice: 'eve',
+  voiceProvider: 'xai' as VoiceProvider,
+  openaiVoice: 'marin',
   isEnabled: true,
 };

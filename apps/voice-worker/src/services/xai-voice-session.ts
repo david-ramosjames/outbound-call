@@ -10,8 +10,9 @@ import {
   type ToolCallContext,
 } from './grok-tools.js';
 import { processCallResults } from './post-call-processor.js';
-import { mapDbVoiceSettings, normalizeXaiVoice } from './map-mission.js';
-import type { CallMission, VoiceSettings } from '@outbound-call/shared';
+import { mapDbVoiceSettings } from './map-mission.js';
+import { acceptCall, buildRealtimeSession, openRealtimeSocket, voiceFor } from './realtime-provider.js';
+import type { CallMission, VoiceProvider, VoiceSettings } from '@outbound-call/shared';
 
 interface TranscriptAccumulator {
   responseId: string;
@@ -31,7 +32,11 @@ export class XaiVoiceSession {
   private greetingSent = false;
   private pendingGreeting = false;
 
-  constructor(missionId: string, callSessionId: string) {
+  constructor(
+    missionId: string,
+    callSessionId: string,
+    private readonly provider: VoiceProvider = 'xai',
+  ) {
     this.missionId = missionId;
     this.callSessionId = callSessionId;
   }
@@ -57,20 +62,29 @@ export class XaiVoiceSession {
     // SIP calls must join with call_id from realtime.call.incoming.
     // Direct (non-SIP) sessions can still use agent_id.
     const isSipCall = Boolean(callId) && callId !== this.missionId;
-    const wsUrl = isSipCall
-      ? `${config.XAI_REALTIME_URL}?call_id=${encodeURIComponent(callId)}`
-      : `${config.XAI_REALTIME_URL}?agent_id=${encodeURIComponent(config.XAI_AGENT_ID)}`;
 
-    logger.info('xAI WebSocket URL mode', {
+    logger.info('Realtime WebSocket URL mode', {
       ...logCtx,
+      provider: this.provider,
       mode: isSipCall ? 'sip_call_id' : 'agent_id',
     });
 
-    this.ws = new WebSocket(wsUrl, {
-      headers: {
-        Authorization: `Bearer ${config.XAI_API_KEY}`,
-      },
-    });
+    if (this.provider === 'openai') {
+      // OpenAI keeps the SIP leg ringing until we accept it with the session config.
+      const accepted = await acceptCall('openai', callId, this.buildSession(mission, vs));
+      if (!accepted) {
+        this.updateSessionStatus('error');
+        this.emitCallEvent('agent_session_failed', { provider: 'openai', xaiCallId: callId });
+        return;
+      }
+    }
+
+    this.ws =
+      isSipCall || this.provider === 'openai'
+        ? openRealtimeSocket(this.provider, callId)
+        : new WebSocket(`${config.XAI_REALTIME_URL}?agent_id=${encodeURIComponent(config.XAI_AGENT_ID)}`, {
+            headers: { Authorization: `Bearer ${config.XAI_API_KEY}` },
+          });
 
     this.sessionStartMs = Date.now();
 
@@ -167,46 +181,43 @@ export class XaiVoiceSession {
     });
   }
 
+  private sessionVoice(voiceSettings: VoiceSettings): string {
+    return this.provider === 'openai' ? voiceSettings.openaiVoice : voiceSettings.defaultVoice;
+  }
+
+  private buildSession(mission: CallMission, voiceSettings: VoiceSettings): Record<string, unknown> {
+    return buildRealtimeSession(this.provider, {
+      instructions: buildPrompt(mission, voiceSettings),
+      tools: getToolDefinitions(),
+      voice: this.sessionVoice(voiceSettings),
+    });
+  }
+
   private sendSessionUpdate(
     mission: CallMission,
     voiceSettings: VoiceSettings
   ): void {
-    const prompt = buildPrompt(mission, voiceSettings);
+    const session = this.buildSession(mission, voiceSettings);
 
     // Save prompt snapshot
     supabase
       .from('call_missions')
-      .update({ prompt_snapshot: prompt })
+      .update({ prompt_snapshot: session.instructions as string })
       .eq('id', this.missionId)
       .then();
 
-    const voice = normalizeXaiVoice(voiceSettings.defaultVoice);
+    const voice = voiceFor(this.provider, this.sessionVoice(voiceSettings));
 
-    const sessionUpdate = {
-      type: 'session.update',
-      session: {
-        instructions: prompt,
-        tools: getToolDefinitions(),
-        voice,
-        turn_detection: { type: 'server_vad' },
-        // Current xAI schema: enable user-side transcription so we receive
-        // conversation.item.input_audio_transcription.completed events.
-        audio: {
-          input: {
-            transcription: { model: 'grok-transcribe' },
-          },
-        },
-      },
-    };
-
-    this.send(sessionUpdate);
+    this.send({ type: 'session.update', session });
     this.emitCallEvent('agent_session_configured', {
       voice,
+      provider: this.provider,
     });
 
     logger.info('Session configured', {
       missionId: this.missionId,
       callSessionId: this.callSessionId,
+      provider: this.provider,
       voice,
     });
   }

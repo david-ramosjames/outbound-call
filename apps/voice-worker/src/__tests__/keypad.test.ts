@@ -13,7 +13,7 @@ vi.mock('../lib/supabase.js', () => ({
   },
 }));
 
-const { carrierConferenceTwiml, conferenceName, KEYPAD_DIGITS, pressKeys, toneSequence } = await import('../services/keypad.js');
+const { carrierConferenceTwiml, conferenceName, dtmfWav, KEYPAD_DIGITS, keypadTonesTwiml, pressKeys, toneSequence } = await import('../services/keypad.js');
 const { getToolDefinitions } = await import('../services/grok-tools.js');
 
 describe('keypad mode', () => {
@@ -32,6 +32,16 @@ describe('keypad mode', () => {
   it('leads every key press with a 1 s pause so the first tone is not lost', () => {
     expect(toneSequence('1')).toBe('ww1');
     expect(toneSequence('12W3#')).toBe('ww12w3#');
+  });
+
+  it('generates an 8 kHz WAV of keypad tones', () => {
+    const wav = dtmfWav('1');
+    expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wav.readUInt32LE(24)).toBe(8000);
+    // 200 ms lead + 250 ms tone + 150 ms gap = 600 ms = 4800 samples
+    expect(wav.length).toBe(44 + 4800 * 2);
+    expect(dtmfWav('1w2').length).toBeGreaterThan(wav.length);
+    expect(keypadTonesTwiml('1')).toContain('/webhooks/twilio/keypad-tones.wav?digits=1</Play>');
   });
 
   it('accepts only keypad characters', () => {

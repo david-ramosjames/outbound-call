@@ -6,11 +6,15 @@ import { logger } from '../utils/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { handleTwilioWebhook } from '../services/twilio-webhook-handler.js';
 import { resolveProvider, sipUriFor } from '../services/realtime-provider.js';
+import { XaiVoiceSession } from '../services/xai-voice-session.js';
 import {
   carrierConferenceTwiml,
   clearKeypadMetadata,
   conferenceName,
+  dtmfWav,
   endKeypadConference,
+  KEYPAD_DIGITS,
+  keypadTonesTwiml,
   redirectCall,
   saveKeypadMetadata,
   startAiLeg,
@@ -151,6 +155,54 @@ function validateTwilioSignature(req: Request): boolean {
     Buffer.from(computed)
   );
 }
+
+/** Keypad mode: TwiML announced to the carrier participant to play keypad tones. */
+twilioRouter.all('/webhooks/twilio/keypad-tones', (req: Request, res: Response): void => {
+  const digits = String(req.query.digits ?? '');
+  if (!KEYPAD_DIGITS.test(digits)) {
+    res.status(400).send('Invalid digits');
+    return;
+  }
+  res.status(200).set('Content-Type', 'text/xml').send(keypadTonesTwiml(digits));
+});
+
+twilioRouter.get('/webhooks/twilio/keypad-tones.wav', (req: Request, res: Response): void => {
+  const digits = String(req.query.digits ?? '');
+  if (!KEYPAD_DIGITS.test(digits)) {
+    res.status(400).send('Invalid digits');
+    return;
+  }
+  res.status(200).set('Content-Type', 'audio/wav').set('Cache-Control', 'public, max-age=86400').send(dtmfWav(digits));
+});
+
+/** Keypad mode: conference join events. Records the conference SID and starts the AI greeting once its leg is in. */
+twilioRouter.post('/webhooks/twilio/keypad-conference', async (req: Request, res: Response): Promise<void> => {
+  if (config.VOICE_MODE === 'live' && !validateTwilioSignature(req)) {
+    res.status(401).json({ error: 'Invalid signature' });
+    return;
+  }
+  res.status(200).set('Content-Type', 'text/xml').send('<Response/>');
+  const missionId = String(req.query.missionId ?? '');
+  const body = req.body as Record<string, string>;
+  if (!missionId || body.StatusCallbackEvent !== 'participant-join') return;
+
+  const { data: session } = await supabase
+    .from('call_sessions')
+    .select('id, telnyx_call_control_id, provider_metadata')
+    .eq('call_mission_id', missionId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!session?.id) return;
+  const meta = (session.provider_metadata ?? {}) as Record<string, unknown>;
+  if (body.ConferenceSid && meta.conference_sid !== body.ConferenceSid) {
+    await saveKeypadMetadata(session.id, { conference_sid: body.ConferenceSid });
+  }
+  if (body.CallSid && body.CallSid !== session.telnyx_call_control_id) {
+    logger.info('Keypad mode: AI leg joined conference', { missionId, aiCallSid: body.CallSid });
+    XaiVoiceSession.notifyAiLegJoined(missionId);
+  }
+});
 
 /** Keypad mode: the AI's SIP leg ended (or never connected), so close the conference and hang up the carrier. */
 twilioRouter.post('/webhooks/twilio/keypad-ai-leg', (req: Request, res: Response): void => {

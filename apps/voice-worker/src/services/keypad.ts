@@ -20,6 +20,7 @@ function twilio() {
 export interface KeypadMetadata {
   keypad_conference: string;
   ai_call_sid?: string;
+  conference_sid?: string;
   time_limit_seconds?: number;
 }
 
@@ -31,6 +32,17 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
+function workerUrl(path: string): string {
+  return `${config.VOICE_WORKER_BASE_URL.replace(/\/$/, '')}${path}`;
+}
+
+/** Conference join events tell us the conference SID and when the AI leg is actually in the room. */
+function conferenceCallbackAttrs(room: string): string {
+  const missionId = room.replace(/^mission-/, '');
+  const url = workerUrl(`/webhooks/twilio/keypad-conference?missionId=${encodeURIComponent(missionId)}`);
+  return `statusCallback="${escapeXml(url)}" statusCallbackEvent="join" statusCallbackMethod="POST"`;
+}
+
 /**
  * Carrier leg: must not end the conference on exit, because it leaves briefly for every key press.
  * timeLimit stops it from sitting in an empty room if the AI side is already gone when it rejoins.
@@ -39,18 +51,18 @@ export function carrierConferenceTwiml(room: string, timeLimitSeconds: number, d
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>${digits ? `\n  <Play digits="${escapeXml(digits)}"/>` : ''}
   <Dial timeLimit="${timeLimitSeconds}">
-    <Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="false" waitUrl="">${escapeXml(room)}</Conference>
+    <Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="false" waitUrl="" ${conferenceCallbackAttrs(room)}>${escapeXml(room)}</Conference>
   </Dial>
 </Response>`;
 }
 
 function aiConferenceTwiml(room: string): string {
-  return `<Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="true" waitUrl="">${escapeXml(room)}</Conference></Dial></Response>`;
+  return `<Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="true" waitUrl="" ${conferenceCallbackAttrs(room)}>${escapeXml(room)}</Conference></Dial></Response>`;
 }
 
 /** Dial the AI over SIP and drop it into the conference. Returns the AI leg's call SID. */
 export async function startAiLeg(input: { sipUri: string; room: string; missionId: string; timeLimitSeconds: number }): Promise<string> {
-  const statusCallback = `${config.VOICE_WORKER_BASE_URL.replace(/\/$/, '')}/webhooks/twilio/keypad-ai-leg?missionId=${encodeURIComponent(input.missionId)}`;
+  const statusCallback = workerUrl(`/webhooks/twilio/keypad-ai-leg?missionId=${encodeURIComponent(input.missionId)}`);
   const call = await twilio().calls.create({
     to: input.sipUri,
     from: config.TWILIO_PHONE_NUMBER,
@@ -73,7 +85,7 @@ async function loadSession(callSessionId: string): Promise<{ carrierSid: string 
   return { carrierSid: row?.telnyx_call_control_id ?? null, meta: (row?.provider_metadata ?? {}) as Partial<KeypadMetadata> };
 }
 
-export async function saveKeypadMetadata(callSessionId: string, meta: KeypadMetadata): Promise<void> {
+export async function saveKeypadMetadata(callSessionId: string, meta: Partial<KeypadMetadata>): Promise<void> {
   const { data } = await supabase.from('call_sessions').select('provider_metadata').eq('id', callSessionId).maybeSingle();
   const existing = ((data as { provider_metadata?: Record<string, unknown> | null } | null)?.provider_metadata ?? {}) as Record<string, unknown>;
   const { error } = await supabase
@@ -105,12 +117,31 @@ export async function redirectCall(callSid: string, twiml: string): Promise<void
 
 export type PressKeysResult = { ok: true } | { ok: false; reason: 'not_available' | 'invalid_digits' | 'failed'; error?: string };
 
-/** Play DTMF to the carrier: step its leg out of the conference, play the tones, rejoin. */
+/**
+ * Play keypad tones to the carrier. Preferred: announce a generated tone WAV to the carrier participant only, so
+ * it never leaves the conference and the tones are plain audio any IVR can detect. Fallback (conference SID not
+ * known yet, or announce fails): step the carrier leg out, <Play digits>, rejoin.
+ */
 export async function pressKeys(callSessionId: string, digits: string): Promise<PressKeysResult> {
   if (!KEYPAD_DIGITS.test(digits)) return { ok: false, reason: 'invalid_digits' };
   const { carrierSid, meta } = await loadSession(callSessionId);
   if (!carrierSid || !meta.keypad_conference) return { ok: false, reason: 'not_available' };
   if (config.VOICE_MODE !== 'live') return { ok: true };
+  if (meta.conference_sid) {
+    try {
+      await twilio()
+        .conferences(meta.conference_sid)
+        .participants(carrierSid)
+        .update({ announceUrl: workerUrl(`/webhooks/twilio/keypad-tones?digits=${encodeURIComponent(digits)}`), announceMethod: 'GET' });
+      return { ok: true };
+    } catch (err) {
+      logger.warn('Keypad announce failed; falling back to redirect', {
+        callSessionId,
+        twilioCallSid: carrierSid,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   try {
     await twilio()
       .calls(carrierSid)
@@ -120,6 +151,60 @@ export async function pressKeys(callSessionId: string, digits: string): Promise<
     logger.error('Keypad press failed', { callSessionId, twilioCallSid: carrierSid, error: err, errorCategory: 'twilio_api' });
     return { ok: false, reason: 'failed', error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+const DTMF_FREQS: Record<string, [number, number]> = {
+  '1': [697, 1209], '2': [697, 1336], '3': [697, 1477],
+  '4': [770, 1209], '5': [770, 1336], '6': [770, 1477],
+  '7': [852, 1209], '8': [852, 1336], '9': [852, 1477],
+  '*': [941, 1209], '0': [941, 1336], '#': [941, 1477],
+};
+
+/** 8 kHz 16-bit mono WAV of standard keypad tones: 250 ms per key, 150 ms gap, "w" = 500 ms pause. */
+export function dtmfWav(digits: string): Buffer {
+  const rate = 8000;
+  const samples: number[] = [];
+  const silence = (ms: number) => {
+    for (let i = 0; i < (rate * ms) / 1000; i++) samples.push(0);
+  };
+  silence(200);
+  for (const ch of digits.toLowerCase()) {
+    if (ch === 'w') {
+      silence(500);
+      continue;
+    }
+    const freqs = DTMF_FREQS[ch];
+    if (!freqs) continue;
+    const n = (rate * 250) / 1000;
+    for (let i = 0; i < n; i++) {
+      const t = i / rate;
+      const v = 0.4 * Math.sin(2 * Math.PI * freqs[0] * t) + 0.4 * Math.sin(2 * Math.PI * freqs[1] * t);
+      samples.push(Math.round(v * 32767));
+    }
+    silence(150);
+  }
+  const data = Buffer.alloc(samples.length * 2);
+  samples.forEach((s, i) => data.writeInt16LE(s, i * 2));
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
+export function keypadTonesTwiml(digits: string): string {
+  const wav = workerUrl(`/webhooks/twilio/keypad-tones.wav?digits=${encodeURIComponent(digits)}`);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>${escapeXml(wav)}</Play></Response>`;
 }
 
 /** End the mission's conference (hangs up whoever is still in it). Safe to call when there is none. */

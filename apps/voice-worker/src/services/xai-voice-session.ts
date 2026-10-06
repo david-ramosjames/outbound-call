@@ -33,11 +33,28 @@ export class XaiVoiceSession {
   private maxDurationTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionStartMs = 0;
   private disconnecting = false;
-  private lastRepSegment: { id: string; itemId: string | null; text: string; seq: number } | null = null;
+  private lastRepSegment: { id: string; itemId: string | null; text: string; seq: number; endMs: number } | null = null;
   private greetingSent = false;
   private keypadMode = false;
   private repHasSpoken = false;
   private pendingGreeting = false;
+  private aiLegJoined = false;
+  private greetingAwaitingJoin = false;
+
+  private static byMission = new Map<string, XaiVoiceSession>();
+  /** Join events that arrive before the session registers (rare). */
+  private static earlyJoins = new Set<string>();
+
+  /** Keypad mode: Twilio reports the AI's leg is in the conference, so audio now reaches the carrier. */
+  static notifyAiLegJoined(missionId: string): void {
+    const session = XaiVoiceSession.byMission.get(missionId);
+    if (!session) {
+      XaiVoiceSession.earlyJoins.add(missionId);
+      setTimeout(() => XaiVoiceSession.earlyJoins.delete(missionId), 30_000);
+      return;
+    }
+    session.onAiLegJoined();
+  }
 
   constructor(
     missionId: string,
@@ -46,6 +63,17 @@ export class XaiVoiceSession {
   ) {
     this.missionId = missionId;
     this.callSessionId = callSessionId;
+    XaiVoiceSession.byMission.set(missionId, this);
+    if (XaiVoiceSession.earlyJoins.delete(missionId)) this.aiLegJoined = true;
+  }
+
+  private onAiLegJoined(): void {
+    if (this.aiLegJoined) return;
+    this.aiLegJoined = true;
+    if (this.greetingAwaitingJoin) {
+      this.greetingAwaitingJoin = false;
+      if (!this.repHasSpoken) this.requestGreeting();
+    }
   }
 
   async connect(callId: string, mission: CallMission): Promise<void> {
@@ -174,6 +202,8 @@ export class XaiVoiceSession {
         this.maxDurationTimer = null;
       }
 
+      if (XaiVoiceSession.byMission.get(this.missionId) === this) XaiVoiceSession.byMission.delete(this.missionId);
+
       // Flush any in-flight AI transcript before teardown
       void this.flushPendingTranscript('websocket_closed');
 
@@ -234,12 +264,16 @@ export class XaiVoiceSession {
     if (this.greetingSent || this.disconnecting) return;
     this.greetingSent = true;
     this.pendingGreeting = false;
-    // Keypad mode: xAI connects ~1 s before Twilio has joined the AI leg to the conference.
-    if (this.keypadMode) {
+    // Keypad mode: xAI connects before Twilio has joined the AI leg to the conference; greet once it has
+    // (Twilio join event), with a fallback in case that event never arrives.
+    if (this.keypadMode && !this.aiLegJoined) {
+      this.greetingAwaitingJoin = true;
       setTimeout(() => {
+        if (!this.greetingAwaitingJoin) return;
+        this.greetingAwaitingJoin = false;
         // If they already spoke, the AI is answering them; a second response.create would overlap it.
         if (!this.repHasSpoken) this.requestGreeting();
-      }, 1500);
+      }, 3000);
       return;
     }
     this.requestGreeting();
@@ -381,9 +415,12 @@ export class XaiVoiceSession {
     const sameUtterance =
       last &&
       this.transcriptSeq === last.seq &&
-      ((itemId && itemId === last.itemId) || normalizeCaption(transcript).startsWith(normalizeCaption(last.text)));
+      (itemId && last.itemId
+        ? itemId === last.itemId
+        : endMs - last.endMs < 4000 && normalizeCaption(transcript).startsWith(normalizeCaption(last.text)));
     if (last && sameUtterance) {
       last.text = transcript;
+      last.endMs = endMs;
       last.itemId = itemId ?? last.itemId;
       const { error } = await supabase
         .from('call_transcript_segments')
@@ -395,7 +432,7 @@ export class XaiVoiceSession {
     const seq = ++this.transcriptSeq;
     const startMs = Math.max(0, endMs - 3000);
     const id = await this.saveTranscriptSegment('insurance_representative', transcript, seq, startMs, endMs);
-    this.lastRepSegment = id ? { id, itemId, text: transcript, seq } : null;
+    this.lastRepSegment = id ? { id, itemId, text: transcript, seq, endMs } : null;
   }
 
   private async handleFunctionCall(
@@ -480,6 +517,7 @@ export class XaiVoiceSession {
   async disconnect(reason?: string): Promise<void> {
     if (this.disconnecting) return;
     this.disconnecting = true;
+    if (XaiVoiceSession.byMission.get(this.missionId) === this) XaiVoiceSession.byMission.delete(this.missionId);
 
     logger.info('Disconnecting xAI session', {
       missionId: this.missionId,

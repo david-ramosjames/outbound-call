@@ -367,6 +367,47 @@ export async function handleEndCall(
   });
 }
 
+export async function handlePressKeys(
+  rawArgs: unknown,
+  ctx: ToolCallContext
+): Promise<string> {
+  const raw = (rawArgs ?? {}) as { digits?: unknown; reason?: unknown };
+  const digits = String(raw.digits ?? '').replace(/[\s,-]/g, '');
+  // Lazy: keypad.ts loads config/Twilio, which this module otherwise doesn't need.
+  const { pressKeys } = await import('./keypad.js');
+  const result = await pressKeys(ctx.callSessionId, digits);
+
+  await saveCallEvent(ctx.missionId, ctx.callSessionId, 'dtmf_sent', {
+    tool: 'press_keys',
+    digits,
+    reason: typeof raw.reason === 'string' ? raw.reason : null,
+    ok: result.ok,
+    error: result.ok ? null : result.reason,
+  });
+
+  logger.info('Tool: press_keys', {
+    missionId: ctx.missionId,
+    callSessionId: ctx.callSessionId,
+    ok: result.ok,
+    eventType: 'dtmf_sent',
+  });
+
+  if (result.ok) {
+    return JSON.stringify({
+      status: 'keys_pressed',
+      digits,
+      message: 'The keys were pressed. Do not speak; stay silent and listen for the next prompt.',
+    });
+  }
+  if (result.reason === 'invalid_digits') {
+    return JSON.stringify({ error: 'invalid_digits', message: 'Use only 0-9, * and # (up to 32 keys).' });
+  }
+  return JSON.stringify({
+    error: result.reason,
+    message: 'Keypad is not available on this call. Say the option out loud instead, or say "representative".',
+  });
+}
+
 // --- Tool dispatch ---
 
 export async function dispatchToolCall(
@@ -389,6 +430,8 @@ export async function dispatchToolCall(
       return handleRecordEscalation(rawArgs, ctx);
     case 'end_call':
       return handleEndCall(rawArgs, ctx);
+    case 'press_keys':
+      return handlePressKeys(rawArgs, ctx);
     default:
       logger.warn(`Unknown tool call: ${name}`, { missionId: ctx.missionId });
       return JSON.stringify({ error: 'unknown_tool', message: `Tool "${name}" is not defined.` });
@@ -397,13 +440,35 @@ export async function dispatchToolCall(
 
 // --- xAI-compatible tool definitions ---
 
-export function getToolDefinitions(): Array<{
+const PRESS_KEYS_TOOL = {
+  type: 'function' as const,
+  name: 'press_keys',
+  description:
+    'Press keys on the phone keypad (DTMF) in an automated phone menu. Use this whenever a menu says "press N" or asks you to enter a number with the keypad. Do not say the digits out loud.',
+  parameters: {
+    type: 'object',
+    properties: {
+      digits: {
+        type: 'string',
+        description: 'Keys to press: 0-9, * and #. Use "w" for a half-second pause between keys (e.g. "1w2").',
+      },
+      reason: {
+        type: 'string',
+        description: 'Which menu option this selects (e.g. "claims department").',
+      },
+    },
+    required: ['digits'],
+  },
+};
+
+export function getToolDefinitions(opts: { keypad?: boolean } = {}): Array<{
   type: 'function';
   name: string;
   description: string;
   parameters: Record<string, unknown>;
 }> {
   return [
+    ...(opts.keypad ? [PRESS_KEYS_TOOL] : []),
     {
       type: 'function',
       name: 'get_approved_case_field',

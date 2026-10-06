@@ -12,6 +12,7 @@ import {
 import { processCallResults } from './post-call-processor.js';
 import { mapDbVoiceSettings } from './map-mission.js';
 import { acceptCall, buildRealtimeSession, openRealtimeSocket, voiceFor } from './realtime-provider.js';
+import { endKeypadConference, keypadConferenceFor } from './keypad.js';
 import type { CallMission, VoiceProvider, VoiceSettings } from '@outbound-call/shared';
 
 interface TranscriptAccumulator {
@@ -188,7 +189,7 @@ export class XaiVoiceSession {
   private buildSession(mission: CallMission, voiceSettings: VoiceSettings): Record<string, unknown> {
     return buildRealtimeSession(this.provider, {
       instructions: buildPrompt(mission, voiceSettings),
-      tools: getToolDefinitions(),
+      tools: getToolDefinitions({ keypad: voiceSettings.keypadEnabled }),
       voice: this.sessionVoice(voiceSettings),
     });
   }
@@ -459,6 +460,9 @@ export class XaiVoiceSession {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, reason ?? 'session_ended');
     }
+
+    const room = await keypadConferenceFor(this.callSessionId).catch(() => null);
+    if (room) void endKeypadConference(room);
 
     await this.onSessionEnded();
   }

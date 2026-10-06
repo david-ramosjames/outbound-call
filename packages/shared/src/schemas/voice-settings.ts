@@ -17,6 +17,8 @@ export const voiceSettingsSchema = z.object({
   defaultVoice: z.string(),
   voiceProvider: z.enum(VOICE_PROVIDERS),
   openaiVoice: z.string(),
+  /** Outbound: connect calls through a Twilio conference so the AI can press keys in phone menus. */
+  keypadEnabled: z.boolean(),
   isEnabled: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -35,5 +37,6 @@ export const DEFAULT_VOICE_SETTINGS = {
   defaultVoice: 'eve',
   voiceProvider: 'xai' as VoiceProvider,
   openaiVoice: 'marin',
+  keypadEnabled: false,
   isEnabled: true,
 };

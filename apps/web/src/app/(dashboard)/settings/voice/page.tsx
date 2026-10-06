@@ -23,6 +23,7 @@ interface VoiceSettingsData {
   default_voice: string;
   voice_provider?: VoiceProvider;
   openai_voice?: string;
+  keypad_enabled?: boolean;
   is_enabled: boolean;
 }
 
@@ -42,6 +43,8 @@ export default function VoiceSettingsPage() {
   });
   /** False until migration 011 adds voice_provider / openai_voice to voice_settings. */
   const [providerColumns, setProviderColumns] = useState(true);
+  /** False until migration 012 adds keypad_enabled. */
+  const [keypadColumn, setKeypadColumn] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -58,8 +61,10 @@ export default function VoiceSettingsPage() {
       const row = data as VoiceSettingsData;
       const hasColumns = 'voice_provider' in row;
       setProviderColumns(hasColumns);
+      setKeypadColumn('keypad_enabled' in row);
       setSettings({
         ...row,
+        keypad_enabled: row.keypad_enabled === true,
         voice_provider: row.voice_provider === 'openai' ? 'openai' : 'xai',
         openai_voice: row.openai_voice || DEFAULT_VOICE_SETTINGS.openaiVoice,
       });
@@ -85,6 +90,7 @@ export default function VoiceSettingsPage() {
       default_voice: settings.default_voice,
       is_enabled: settings.is_enabled,
       ...(providerColumns ? { voice_provider: settings.voice_provider, openai_voice: settings.openai_voice } : {}),
+      ...(keypadColumn ? { keypad_enabled: settings.keypad_enabled === true } : {}),
     };
 
     if (settings.id) {
@@ -289,6 +295,38 @@ export default function VoiceSettingsPage() {
                 : 'Outbound calls use Grok. To choose OpenAI here, run migration 20240101000011_voice_provider.sql in Supabase.'
             }
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Phone Menus (Keypad)</CardTitle>
+          <CardDescription>
+            Lets the outbound AI press keys when a carrier&apos;s phone menu says &quot;press 4&quot;.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 flex gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-700">
+              Off by default. When on, outbound calls are connected through a Twilio conference so
+              Twilio can play the key tones (Grok and OpenAI can&apos;t send them). This adds a second
+              Twilio call leg plus conference minutes. If the conference can&apos;t be set up, the call
+              falls back to the normal connection without keypad.
+            </p>
+          </div>
+          {keypadColumn ? (
+            <Toggle
+              checked={settings.keypad_enabled === true}
+              onChange={(v) => setSettings((s) => ({ ...s, keypad_enabled: v }))}
+              label="Let the AI press keys in phone menus"
+              description="Applies to new outbound calls."
+            />
+          ) : (
+            <p className="text-xs text-slate-500">
+              To use this, run migration 20240101000012_outbound_keypad.sql in Supabase.
+            </p>
+          )}
         </CardContent>
       </Card>
 

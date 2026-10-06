@@ -168,6 +168,7 @@ export function mapDbVoiceSettings(
     ),
     voiceProvider: pickStr('voiceProvider', 'voice_provider', 'xai') === 'openai' ? 'openai' : 'xai',
     openaiVoice: normalizeOpenaiVoice(pickStr('openaiVoice', 'openai_voice', DEFAULT_VOICE_SETTINGS.openaiVoice)),
+    keypadEnabled: pickBool('keypadEnabled', 'keypad_enabled', DEFAULT_VOICE_SETTINGS.keypadEnabled),
     isEnabled: pickBool('isEnabled', 'is_enabled', DEFAULT_VOICE_SETTINGS.isEnabled),
     createdAt: pickStr('createdAt', 'created_at', new Date().toISOString()),
     updatedAt: pickStr('updatedAt', 'updated_at', new Date().toISOString()),

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { logger } from '../utils/logger.js';
 import { canTransitionStatus } from '@outbound-call/shared';
 import type { CallStatus } from '@outbound-call/shared';
+import { endKeypadConference, keypadConferenceFor } from './keypad.js';
 
 interface TwilioStatusCallback {
   CallSid: string;
@@ -229,6 +230,12 @@ async function handleCompleted(
       ...(duration !== null ? { duration_seconds: duration } : {}),
     })
     .eq('id', missionId);
+
+  // Keypad mode: the AI leg is in a conference and would otherwise stay on after the carrier hangs up.
+  if (callSessionId) {
+    const room = await keypadConferenceFor(callSessionId);
+    if (room) await endKeypadConference(room);
+  }
 }
 
 async function handleFailed(

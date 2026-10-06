@@ -25,7 +25,7 @@ export function buildPrompt(
   sections.push(buildRequiredOutputsSection());
   sections.push(buildApprovedContextSection(mission));
   sections.push(buildRestrictionsSection(mission));
-  sections.push(buildBehaviorSection());
+  sections.push(buildBehaviorSection(voiceSettings.keypadEnabled === true));
   sections.push(buildCaptureAndConfirmationSection());
   sections.push(buildEscalationSection(mission));
   sections.push(buildCompletionSection(mission));
@@ -233,7 +233,7 @@ ${restricted || '  (none listed)'}
 If a restricted topic comes up, politely decline and redirect the conversation back to the mission objective. If the representative insists, use the \`record_escalation\` tool and consider ending the call.`;
 }
 
-function buildBehaviorSection(): string {
+function buildBehaviorSection(keypadEnabled: boolean): string {
   return `## Conversation Behavior
 - Speak clearly and at a natural pace
 - Use professional but friendly language appropriate for business calls
@@ -259,8 +259,14 @@ Carrier phone trees (GEICO, State Farm, USAA, etc.) repeatedly ask short routing
 - When entering claim/policy numbers, speak slowly and group digits; use the "How to Say the Claim Number" field when provided
 - Accept transfers to the requested department (total loss, PD, PIP, BI). After transfer, re-verify claim and client
 - If offered a callback queue option, remain on the line unless the mission instructions say otherwise
-- If DTMF entry is required and speech fails twice, use keypad entry when the platform supports it`;
+${keypadEnabled ? KEYPAD_ON_RULES : KEYPAD_OFF_RULES}`;
 }
+
+const KEYPAD_ON_RULES = `- When a menu says "press N" (e.g. "for claims, press 4"), call the press_keys tool with that digit. Never say the digit out loud; IVRs that want keys do not hear spoken numbers
+- When the menu asks you to enter a number with the keypad (claim number, policy number, ZIP), call press_keys with the digits, followed by "#" only if the menu says to end with pound
+- After press_keys, stay silent and listen for the next prompt. If the same menu repeats, press the key once more; if it repeats again, press 0 or say "representative"`;
+
+const KEYPAD_OFF_RULES = `- You cannot press keypad keys on this call. If a menu says "press N", say the option word instead (e.g. "Claims") rather than the digit, and if the menu does not respond after two tries, say "representative" or "agent"`;
 
 function buildEscalationSection(mission: CallMission): string {
   const rules = (mission.escalationRules ?? [])

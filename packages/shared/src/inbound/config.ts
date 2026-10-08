@@ -531,6 +531,25 @@ export const agentInstructionsSchema = z.object({
   existing_client_language: z
     .string()
     .default("Thanks for calling. Let me get a few details so I can get your message to your case team."),
+  /** Facts about the firm the agent may share (value propositions, office address, website). */
+  firm_knowledge: z.string().default(''),
+  objection_handling: z
+    .string()
+    .default(
+      [
+        'Objections are requests for reassurance, not rejection. Acknowledge, ask what is on their mind, answer, then offer a concrete next step. Never just say "call us back when you\'re ready."',
+        '"I\'m busy / at work": "I completely understand. This only takes a couple of minutes." If they truly can\'t talk, ask what time today works best for a call back, confirm the number, and record it with request_callback.',
+        '"I\'m not sure I have a case": "That\'s exactly what our team is here to figure out. Many of our clients felt the same way before talking with us."',
+        '"How much will this cost?": There are no upfront costs; the firm only gets paid if it wins the case.',
+        '"I don\'t want to sue anyone": "That\'s completely understandable. In most cases we deal with the insurance company, and the attorneys always talk with you before going in any direction."',
+        '"I need to finish treatment first": Having an attorney early can help protect the case while they focus on healing. Keep following their doctor\'s advice.',
+      ].join('\n'),
+    ),
+  /** What to say when the matter is not a type of case the firm handles (e.g. a referral service). */
+  referral_language: z.string().default(''),
+  closing_language: z
+    .string()
+    .default('It has been a pleasure speaking with you. Is there anything else I can help you with right now?'),
 });
 export type AgentInstructions = z.infer<typeof agentInstructionsSchema>;
 

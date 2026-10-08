@@ -1,4 +1,4 @@
-import type { IntakeFacts } from './facts.js';
+import { LEAD_SOURCE_LABELS, type IntakeFacts } from './facts.js';
 import type { InboundIntakeState } from './state.js';
 import { INBOUND_CASE_TYPE_LABELS, QUALIFICATION_RESULT_LABELS } from './types.js';
 
@@ -59,6 +59,11 @@ export function formatIntakeSummary(state: InboundIntakeState): string {
   out.push(`Phone: ${f.phone ?? state.callerIdNumber ?? 'Unknown'}`);
   if (f.email) out.push(`Email: ${f.email}`);
   out.push(`Language: ${state.language === 'es' ? 'Spanish' : 'English'}`);
+  if (f.lead_source || f.lead_source_detail) {
+    out.push(
+      `Heard about us: ${[f.lead_source && LEAD_SOURCE_LABELS[f.lead_source], f.lead_source_detail].filter(Boolean).join(' — ')}`,
+    );
+  }
   if (f.injured_person_name || f.caller_relationship_to_injured_person) {
     out.push(`Injured person: ${[f.injured_person_name, f.caller_relationship_to_injured_person && `(${f.caller_relationship_to_injured_person})`].filter(Boolean).join(' ')}`);
   }

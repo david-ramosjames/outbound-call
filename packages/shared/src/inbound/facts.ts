@@ -6,6 +6,31 @@ import {
   INJURY_SEVERITIES,
 } from './types.js';
 
+/** How the caller found the firm (marketing attribution). */
+export const LEAD_SOURCES = [
+  'google_search',
+  'google_ads',
+  'personal_referral',
+  'attorney_referral',
+  'medical_provider_referral',
+  'website_form',
+  'social_media',
+  'returning_client',
+  'other',
+] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
+  google_search: 'Google Search',
+  google_ads: 'Google LSA / Ads',
+  personal_referral: 'Personal Referral',
+  attorney_referral: 'Attorney Referral',
+  medical_provider_referral: 'Medical Provider Referral',
+  website_form: 'Website Form',
+  social_media: 'Social Media',
+  returning_client: 'Returning Client',
+  other: 'Other',
+};
+
 const optStr = z.string().trim().min(1).nullable().optional();
 const optBool = z.boolean().nullable().optional();
 
@@ -70,6 +95,10 @@ export const intakeFactsSchema = z.object({
   existing_client_reason: optStr,
   other_call_reason: optStr,
 
+  lead_source: z.enum(LEAD_SOURCES).nullable().optional(),
+  /** Who referred them, which firm, which ad, etc. */
+  lead_source_detail: optStr,
+
   declined_to_provide: z.array(z.string()).optional(),
   case_specific: z.record(z.string()).optional(),
 });
@@ -122,4 +151,6 @@ export const INTAKE_FACT_LABELS: Partial<Record<IntakeFactKey, string>> = {
   existing_client_case_reference: 'Existing case reference',
   existing_client_reason: 'Reason for call (existing client)',
   other_call_reason: 'Reason for call',
+  lead_source: 'How they heard about us',
+  lead_source_detail: 'Lead source detail',
 };

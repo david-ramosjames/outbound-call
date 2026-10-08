@@ -49,6 +49,17 @@ const SECTIONS: Array<{ title: string; description: string; fields: Array<{ key:
     ],
   },
   {
+    title: 'Firm Knowledge & Objections',
+    description:
+      'What the agent may say about the firm (it shares only these facts), how it handles common objections (one per line), and what it says when a matter is not a type of case the firm handles.',
+    fields: [
+      { key: 'firm_knowledge', label: 'About the firm (value propositions, address, website)', rows: 10 },
+      { key: 'objection_handling', label: 'Objection handling', rows: 12 },
+      { key: 'referral_language', label: 'Matters we don\u2019t handle (referral)', rows: 4 },
+      { key: 'closing_language', label: 'Closing line', rows: 2 },
+    ],
+  },
+  {
     title: 'Guardrails & Escalation',
     description: 'One item per line. These are added on top of the built-in guardrails, which cannot be removed.',
     fields: [

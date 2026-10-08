@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CONTRACT_DELIVERY_METHODS } from './config.js';
 import { INBOUND_CALLER_TYPES, INBOUND_CASE_TYPES, INBOUND_LANGUAGES, INJURY_SEVERITIES } from './types.js';
+import { LEAD_SOURCES } from './facts.js';
 
 // ---------- Argument schemas (validated server-side before anything runs) ----------
 
@@ -104,6 +105,11 @@ const FACT_PROPERTIES: Record<string, Record<string, unknown>> = {
   existing_client_case_reference: str('Existing client\'s case number or name on the case'),
   existing_client_reason: str('Why the existing client is calling'),
   other_call_reason: str('Why a non-client is calling'),
+  lead_source: enumOf(
+    [...LEAD_SOURCES],
+    'How they found the firm. "I googled injury lawyer" = google_search; "saw you at the top of Google" = google_ads; friend/family = personal_referral; another lawyer = attorney_referral; doctor/chiropractor = medical_provider_referral; filled a form on the website = website_form; Facebook/Instagram/TikTok = social_media; past client = returning_client.',
+  ),
+  lead_source_detail: str('Who referred them (name), which law firm, which ad or platform, etc.'),
 };
 
 type ToolDef = { type: 'function'; name: string; description: string; parameters: Record<string, unknown> };

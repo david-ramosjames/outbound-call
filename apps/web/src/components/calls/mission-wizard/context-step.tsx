@@ -18,12 +18,15 @@ interface ContextStepProps {
   contextFields: ApprovedContextEntry[];
   onToggleField: (index: number) => void;
   onUpdateValue: (index: number, value: string) => void;
+  /** field → where its pre-filled value came from (e.g. "previous call to GEICO on 10/6/2026"). */
+  suggestions?: Record<string, string>;
 }
 
 export function ContextStep({
   contextFields,
   onToggleField,
   onUpdateValue,
+  suggestions = {},
 }: ContextStepProps) {
   const indexByField = new Map(
     contextFields.map((field, index) => [field.field, index] as const),
@@ -59,6 +62,13 @@ export function ContextStep({
           </div>
         </div>
       </div>
+
+      {Object.keys(suggestions).length > 0 && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
+          Some fields are pre-filled from earlier calls on this case (marked below). Check they&apos;re still
+          right for this carrier before sharing them.
+        </div>
+      )}
 
       {CONTEXT_FIELD_GROUPS.map((group) => (
         <section key={group.id} className="space-y-3">
@@ -120,7 +130,13 @@ export function ContextStep({
                           claim without it.
                         </p>
                       )}
+                      {suggestions[field.field] && displayValue && (
+                        <p className="text-[11px] text-sky-700">
+                          From {suggestions[field.field]}
+                        </p>
+                      )}
                       {field.value &&
+                        !suggestions[field.field] &&
                         field.missionSpecificValue !== undefined &&
                         field.missionSpecificValue !== field.value && (
                           <p className="text-[11px] text-slate-500">

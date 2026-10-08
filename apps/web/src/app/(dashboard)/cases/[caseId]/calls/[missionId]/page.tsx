@@ -46,6 +46,35 @@ const REQUIRED_OUTPUT_STRUCTURED_KEYS: Record<
 
 type Tab = 'overview' | 'summary' | 'updates' | 'transcript';
 
+/** The case details staff approved for this call — exactly what the AI was allowed to use. */
+function ProvidedContextCard({ rows }: { rows: ApprovedContextRow[] }) {
+  const shared = rows.filter((r) => r.included && r.value?.trim());
+  const withheld = rows.filter((r) => !r.included && r.value?.trim()).length;
+  if (shared.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Information Given to the AI</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="divide-y divide-slate-100 text-sm">
+          {shared.map((r) => (
+            <div key={r.field} className="flex justify-between gap-4 py-2">
+              <dt className="text-slate-500">{r.label || r.field}</dt>
+              <dd className="text-right font-medium text-slate-900 break-words max-w-[60%]">{r.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {withheld > 0 && (
+          <p className="text-xs text-slate-400 mt-3">
+            {withheld} other filled-in field{withheld === 1 ? ' was' : 's were'} not shared with the AI.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 interface CallMission {
   id: string;
   case_id: string;
@@ -69,6 +98,14 @@ interface CallMission {
   duration_seconds: number | null;
   failure_reason: string | null;
   created_at: string;
+  approved_context?: ApprovedContextRow[] | null;
+}
+
+interface ApprovedContextRow {
+  field: string;
+  label?: string;
+  value?: string;
+  included?: boolean;
 }
 
 interface CallResultField {
@@ -620,6 +657,8 @@ export default function MissionDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          <ProvidedContextCard rows={mission.approved_context ?? []} />
 
           {resultFields.length > 0 && (
             <div>

@@ -87,6 +87,83 @@ function applyMissionDefaults(
   });
 }
 
+/** Hardcoded starting values; what staff entered on the previous call takes precedence over these. */
+const FIXED_DEFAULT_FIELDS = new Set<string>([
+  'law_firm_name',
+  'law_firm_phone_number',
+  'representation_status',
+  'policy_type',
+  'incident_type',
+  'accident_state',
+]);
+
+/** Reviewed call results that answer a context field on the next call. */
+const RESULT_TO_CONTEXT: Record<string, ApprovedContextEntry['field']> = {
+  claim_number: 'existing_claim_number',
+  adjuster_name: 'known_adjuster_name',
+  adjuster_phone: 'known_adjuster_phone',
+  adjuster_email: 'known_adjuster_email',
+};
+
+/**
+ * Suggested values from earlier calls on this case: what staff entered on the most recent call, plus claim and
+ * adjuster details a reviewer accepted from any earlier call (unreviewed AI extractions are not used).
+ */
+async function loadPreviousCallValues(
+  supabase: ReturnType<typeof createClient>,
+  caseId: string,
+): Promise<{ values: Record<string, string>; included: Set<string>; sources: Record<string, string> }> {
+  const values: Record<string, string> = {};
+  const included = new Set<string>();
+  const sources: Record<string, string> = {};
+
+  const { data: missions } = await supabase
+    .from('call_missions')
+    .select('id, organization_name, created_at, approved_context')
+    .eq('case_id', caseId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (!missions || missions.length === 0) return { values, included, sources };
+
+  const describe = (m: { organization_name?: string | null; created_at: string }) =>
+    `previous call${m.organization_name ? ` to ${m.organization_name}` : ''} on ${new Date(m.created_at).toLocaleDateString()}`;
+
+  const latest = missions[0]!;
+  for (const row of (latest.approved_context ?? []) as Array<{ field: string; value?: string; included?: boolean }>) {
+    const v = row.value?.trim();
+    if (!v) continue;
+    values[row.field] = v;
+    sources[row.field] = describe(latest);
+    if (row.included) included.add(row.field);
+  }
+
+  const { data: results } = await supabase
+    .from('call_results')
+    .select('id, call_mission_id')
+    .in('call_mission_id', missions.map((m) => m.id));
+  if (results && results.length > 0) {
+    const missionByResult = new Map(results.map((r) => [r.id, missions.find((m) => m.id === r.call_mission_id)!]));
+    const { data: fields } = await supabase
+      .from('call_result_fields')
+      .select('call_result_id, field_key, extracted_value, reviewed_value, review_status, created_at')
+      .in('call_result_id', results.map((r) => r.id))
+      .in('review_status', ['accepted', 'edited'])
+      .order('created_at', { ascending: false });
+    const filled = new Set<string>();
+    for (const f of fields ?? []) {
+      const target = RESULT_TO_CONTEXT[f.field_key as string];
+      const v = String(f.reviewed_value || f.extracted_value || '').trim();
+      if (!target || !v || filled.has(target)) continue;
+      filled.add(target);
+      values[target] = v;
+      included.add(target);
+      sources[target] = `reviewed result from ${describe(missionByResult.get(f.call_result_id)!)}`;
+    }
+  }
+
+  return { values, included, sources };
+}
+
 export default function NewCallPage() {
   const params = useParams<{ caseId: string }>();
   const router = useRouter();
@@ -118,6 +195,8 @@ export default function NewCallPage() {
         'open_claim_third_party',
       ),
   );
+
+  const [suggestions, setSuggestions] = useState<Record<string, string>>({});
 
   const [instructions, setInstructions] = useState<MissionInstructions>(() =>
     buildInstructions('open_claim_third_party'),
@@ -160,11 +239,19 @@ export default function NewCallPage() {
       accident_state: 'Texas',
     };
 
+    const previous = await loadPreviousCallValues(supabase, caseId);
+    setSuggestions(
+      Object.fromEntries(
+        Object.entries(previous.sources).filter(([field]) => !mappedValues[field] || FIXED_DEFAULT_FIELDS.has(field)),
+      ),
+    );
+
     setContextFields((prev) =>
       applyMissionDefaults(
         prev.map((f) => {
-          const mapped = mappedValues[f.field];
-          const value = mapped ? String(mapped) : f.value;
+          const fromPrevious = previous.values[f.field];
+          const mapped = FIXED_DEFAULT_FIELDS.has(f.field) && fromPrevious ? fromPrevious : mappedValues[f.field];
+          const value = mapped ? String(mapped) : f.value || fromPrevious || '';
           return {
             ...f,
             value,
@@ -172,6 +259,11 @@ export default function NewCallPage() {
           };
         }),
         missionType,
+      ).map((f) =>
+        // Carry forward only what staff shared last time; other suggested values start off.
+        f.field in previous.values && (!mappedValues[f.field] || FIXED_DEFAULT_FIELDS.has(f.field))
+          ? { ...f, included: previous.included.has(f.field) && !withheld.has(f.field) }
+          : f,
       ),
     );
   }, [caseId, missionType]);
@@ -398,6 +490,7 @@ export default function NewCallPage() {
             contextFields={contextFields}
             onToggleField={handleToggleField}
             onUpdateValue={handleUpdateFieldValue}
+            suggestions={suggestions}
           />
         )}
         {currentStep === 2 && (

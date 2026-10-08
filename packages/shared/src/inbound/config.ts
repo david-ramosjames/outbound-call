@@ -547,6 +547,22 @@ export const agentInstructionsSchema = z.object({
     ),
   /** What to say when the matter is not a type of case the firm handles (e.g. a referral service). */
   referral_language: z.string().default(''),
+  /** Said once early in the call so the caller knows what to expect. */
+  call_expectations: z
+    .string()
+    .default(
+      "Here's how this works: I'll ask you a few questions about what happened, your injuries, and any medical treatment. It only takes a few minutes, and then we'll talk about next steps.",
+    ),
+  /** How the firm helps with property damage (car repairs, total loss). */
+  property_damage_language: z.string().default(''),
+  /** How the firm helps injured callers get medical treatment (providers, cost, insurance). */
+  medical_treatment_language: z.string().default(''),
+  /** The overall process with the firm, explained once the agreement can be offered. */
+  process_overview: z.string().default(''),
+  /** Said after the agreement is signed (direct number, when the team will reach out). */
+  after_signing_language: z.string().default(''),
+  /** What to say when the firm can't take an injury case (a second opinion / referral, never a rejection). */
+  injury_referral_language: z.string().default(''),
   closing_language: z
     .string()
     .default('It has been a pleasure speaking with you. Is there anything else I can help you with right now?'),

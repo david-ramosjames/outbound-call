@@ -5,6 +5,7 @@ import {
   inboundFlagsSchema,
   qualificationConfigSchema,
   routingSchema,
+  slackSchema,
 } from '@outbound-call/shared';
 import { requireAdmin, writeInboundAudit } from '@/lib/inbound-admin';
 
@@ -14,6 +15,7 @@ const SECTION_SCHEMAS = {
   routing: routingSchema,
   contracts: contractsSchema,
   qualification: qualificationConfigSchema,
+  slack: slackSchema,
 } as const;
 type Section = keyof typeof SECTION_SCHEMAS;
 

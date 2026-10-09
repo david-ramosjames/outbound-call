@@ -22,6 +22,7 @@ export default function RoutingAndHoursPage() {
   const [holidayName, setHolidayName] = useState('');
   const bh = config.business_hours;
   const r = config.routing;
+  const s = config.slack;
   const status = useMemo(() => {
     try {
       return getBusinessStatus(bh);
@@ -34,6 +35,7 @@ export default function RoutingAndHoursPage() {
 
   const setBh = (patch: Partial<typeof bh>) => setConfig((c) => ({ ...c, business_hours: { ...c.business_hours, ...patch } }));
   const setRouting = (patch: Partial<typeof r>) => setConfig((c) => ({ ...c, routing: { ...c.routing, ...patch } }));
+  const setSlack = (patch: Partial<typeof s>) => setConfig((c) => ({ ...c, slack: { ...c.slack, ...patch } }));
   const setDay = (day: Weekday, open: boolean, start?: string, end?: string) => {
     const current = bh.weekly[day][0] ?? { start: '08:00', end: '17:00' };
     setBh({ weekly: { ...bh.weekly, [day]: open ? [{ start: start ?? current.start, end: end ?? current.end }] : [] } });
@@ -209,6 +211,33 @@ export default function RoutingAndHoursPage() {
               onChange={(e) => setRouting({ max_call_seconds: parseInt(e.target.value) || 1800 })}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Slack</CardTitle>
+          <CardDescription>
+            Post every finished call on this line (summary, then the transcript as replies) to the firm&apos;s lead calls channel. Needs SLACK_BOT_TOKEN on the worker, with the bot invited to the channel.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Toggle checked={s.enabled} onChange={(v) => setSlack({ enabled: v })} label="Post calls to Slack" />
+          <div className="w-80">
+            <Input id="slack-channel" label="Channel ID" placeholder="C0123ABCD" value={s.channel_id} onChange={(e) => setSlack({ channel_id: e.target.value.trim() })} hint="In Slack: open the channel → name → About → Channel ID" />
+          </div>
+          <div className="flex flex-wrap gap-6">
+            <Toggle
+              checked={s.thread_by_phone}
+              onChange={(v) => setSlack({ thread_by_phone: v })}
+              label="Reply in the caller's existing thread"
+              description="If a post with the caller's phone number is in the channel from the last 7 days (e.g. from the Quo router), the call is posted in that thread"
+            />
+            <Toggle checked={s.include_transcript} onChange={(v) => setSlack({ include_transcript: v })} label="Include the full transcript" />
+          </div>
+          <Button onClick={() => save('slack', s)} disabled={saving === 'slack'}>
+            <Save className="h-4 w-4 mr-1.5" /> {saving === 'slack' ? 'Saving...' : 'Save Slack'}
+          </Button>
         </CardContent>
       </Card>
 

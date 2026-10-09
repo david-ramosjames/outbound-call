@@ -34,6 +34,7 @@ const WORKER_VARS: EnvVar[] = [
   { key: 'OPENAI_WEBHOOK_SECRET', need: 'optional', purpose: 'Signing secret (whsec_…) of the OpenAI project webhook for incoming calls (URL below).' },
   { key: 'SIGNFLOW_INTAKE_TOKEN', need: 'contracts', purpose: 'Bearer token for Sign Flow, both directions. Must equal SIGNFLOW_INTAKE_TOKEN on Sign Flow.' },
   { key: 'INBOUND_CONTRACT_WEBHOOK_SECRET', need: 'optional', purpose: 'Only for non-Sign Flow e-sign tools posting signature status. Not needed with Sign Flow.' },
+  { key: 'SLACK_BOT_TOKEN', need: 'optional', purpose: 'Slack bot token (xoxb-…) for posting intake calls (needs chat:write and channels:history; invite the bot to the channel). A line can use its own bot with SLACK_BOT_TOKEN_<LINE_SLUG>, e.g. SLACK_BOT_TOKEN_TRUCKING_CHICAS.' },
 ];
 
 const WEB_VARS: EnvVar[] = [

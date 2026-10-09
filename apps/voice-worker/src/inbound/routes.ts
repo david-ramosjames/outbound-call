@@ -308,6 +308,7 @@ inboundRouter.get('/internal/inbound/env-status', async (req: Request, res: Resp
       OPENAI_PROJECT_ID: set(config.OPENAI_PROJECT_ID),
       OPENAI_WEBHOOK_SECRET: set(config.OPENAI_WEBHOOK_SECRET),
       INBOUND_CONTRACT_WEBHOOK_SECRET: set(config.INBOUND_CONTRACT_WEBHOOK_SECRET),
+      SLACK_BOT_TOKEN: set(config.SLACK_BOT_TOKEN),
     },
     urls: {
       voice: `${base}/webhooks/inbound/twilio/voice`,

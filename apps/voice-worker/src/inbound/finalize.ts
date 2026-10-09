@@ -1,5 +1,6 @@
 import { deriveIntakeStatus, evaluateQualification, formatIntakeSummary } from '@outbound-call/shared';
 import { logger } from '../utils/logger.js';
+import { postInboundCallToSlack } from './slack.js';
 import { getInboundCall, loadIntakeForCall, loadLineSettings, saveIntakeState, updateInboundCall, writeAudit } from './store.js';
 
 const finalized = new Set<string>();
@@ -47,4 +48,5 @@ export async function finalizeInboundCall(callId: string, reason: string, opts: 
   });
   await writeAudit({ callId, intakeId: state.intakeId }, { type: 'CALL_COMPLETED', actor: 'SYSTEM', data: { reason, status: state.status, duration_seconds: duration } });
   logger.info('Inbound call finalized', { inboundCallId: callId, status: state.status, reason });
+  void postInboundCallToSlack(callId);
 }

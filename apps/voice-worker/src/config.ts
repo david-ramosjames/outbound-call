@@ -26,6 +26,8 @@ const envSchema = z.object({
   OPENAI_TEXT_MODEL: z.string().default('gpt-4.1'),
   INBOUND_CONTRACT_WEBHOOK_SECRET: z.string().default(''),
   SIGNFLOW_INTAKE_TOKEN: z.string().default(''),
+  /** Slack bot token (xoxb-...) for posting intake calls; a line can override it with SLACK_BOT_TOKEN_<LINE_SLUG>. */
+  SLACK_BOT_TOKEN: z.string().default(''),
 
   TWILIO_ACCOUNT_SID: isMock ? z.string().default('mock-twilio-sid') : z.string().min(1),
   TWILIO_AUTH_TOKEN: isMock ? z.string().default('mock-twilio-token') : z.string().min(1),

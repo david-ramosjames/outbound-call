@@ -114,6 +114,24 @@ export const contractsSchema = z.object({
 });
 export type ContractsConfig = z.infer<typeof contractsSchema>;
 
+// ---------- Slack ----------
+
+export const slackSchema = z.object({
+  /** Post each finished call (summary + transcript) to Slack. */
+  enabled: z.boolean().default(false),
+  /** Channel id (e.g. C0123ABCD) of the firm's lead calls channel. The bot must be a member. */
+  channel_id: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^[CG][A-Z0-9]{6,}$/.test(v), 'must be a Slack channel id like C0123ABCD')
+    .default(''),
+  /** Reply in the existing thread for the caller's phone number (last 7 days) instead of a new post. */
+  thread_by_phone: z.boolean().default(true),
+  /** Also post the full transcript (as replies in the thread). */
+  include_transcript: z.boolean().default(true),
+});
+export type SlackConfig = z.infer<typeof slackSchema>;
+
 // ---------- Qualification rules ----------
 
 export const RULE_OPERATORS = [
@@ -429,6 +447,7 @@ export const inboundConfigSchema = z.object({
   routing: routingSchema.default({}),
   contracts: contractsSchema.default({}),
   qualification: qualificationConfigSchema.default({}),
+  slack: slackSchema.default({}),
 });
 export type InboundConfig = z.infer<typeof inboundConfigSchema>;
 
@@ -443,6 +462,7 @@ export function resolveInboundConfig(row: unknown): InboundConfig {
     routing: source.routing ?? undefined,
     contracts: source.contracts ?? undefined,
     qualification: source.qualification ?? undefined,
+    slack: source.slack ?? undefined,
   });
   return parsed.success ? parsed.data : inboundConfigSchema.parse({});
 }

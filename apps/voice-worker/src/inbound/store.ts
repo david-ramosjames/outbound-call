@@ -135,6 +135,9 @@ export interface InboundCallRow {
   answered_at: string | null;
   ended_at: string | null;
   line_id?: string | null;
+  duration_seconds?: number | null;
+  simulated?: boolean;
+  slack_message_ts?: string | null;
 }
 
 export async function getInboundCall(callId: string): Promise<InboundCallRow | null> {

@@ -19,6 +19,12 @@ export function resolveProvider(requested: string | null | undefined): VoiceProv
   return 'xai';
 }
 
+/** The model a session.created / session.updated event reports (e.g. grok-voice-3.0), if any. */
+export function sessionModel(event: unknown): string | null {
+  const session = (event as { session?: { model?: unknown } } | null)?.session;
+  return typeof session?.model === 'string' && session.model ? session.model : null;
+}
+
 /** SIP address Twilio dials to reach the provider. */
 export function sipUriFor(provider: VoiceProvider): string {
   if (provider === 'openai') return `sip:${config.OPENAI_PROJECT_ID.trim()}@sip.api.openai.com;transport=tls`;

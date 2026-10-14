@@ -16,7 +16,7 @@ import {
   type VoiceProvider,
 } from '@outbound-call/shared';
 import { logger } from '../utils/logger.js';
-import { acceptCall, buildRealtimeSession, openRealtimeSocket } from '../services/realtime-provider.js';
+import { acceptCall, buildRealtimeSession, openRealtimeSocket, sessionModel } from '../services/realtime-provider.js';
 import { finalizeInboundCall } from './finalize.js';
 import { createLiveRuntime } from './runtime.js';
 import { getInboundCall, loadIntakeForCall, loadLineSettings, saveTranscript, updateInboundCall, updateTranscript, type InboundCallRow } from './store.js';
@@ -177,7 +177,11 @@ export class InboundVoiceSession {
 
   private async handleEvent(event: Record<string, unknown>): Promise<void> {
     switch (event.type as string) {
+      case 'session.created':
+        logger.info('Inbound realtime session.created', { inboundCallId: this.callId, model: sessionModel(event) ?? 'not reported' });
+        break;
       case 'session.updated':
+        logger.info('Inbound realtime session.updated', { inboundCallId: this.callId, model: sessionModel(event) ?? 'not reported' });
         this.sendGreeting();
         break;
       case 'response.created':

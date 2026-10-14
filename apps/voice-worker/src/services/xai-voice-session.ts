@@ -11,7 +11,7 @@ import {
 } from './grok-tools.js';
 import { processCallResults } from './post-call-processor.js';
 import { mapDbVoiceSettings } from './map-mission.js';
-import { acceptCall, buildRealtimeSession, openRealtimeSocket, voiceFor } from './realtime-provider.js';
+import { acceptCall, buildRealtimeSession, openRealtimeSocket, sessionModel, voiceFor } from './realtime-provider.js';
 import { endKeypadConference, keypadConferenceFor } from './keypad.js';
 import type { CallMission, VoiceProvider, VoiceSettings } from '@outbound-call/shared';
 
@@ -331,12 +331,15 @@ export class XaiVoiceSession {
       case 'session.created':
         logger.info('xAI session.created', {
           missionId: this.missionId,
+          model: sessionModel(event) ?? 'not reported',
         });
+        if (sessionModel(event)) this.emitCallEvent('voice_model', { model: sessionModel(event) });
         break;
 
       case 'session.updated':
         logger.info('xAI session.updated', {
           missionId: this.missionId,
+          model: sessionModel(event) ?? 'not reported',
         });
         if (this.pendingGreeting && !this.greetingSent) {
           this.sendInitialGreeting();

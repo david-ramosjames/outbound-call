@@ -146,7 +146,7 @@ supabase db reset  # Runs all migrations
 
 All tables use RLS. Key policies:
 - Users can only access missions for cases they have access to
-- The voice worker uses the service role key (bypasses RLS)
+- The voice worker uses the secret key (`SUPABASE_SECRET_KEY` / `sb_secret_…`; bypasses RLS)
 - Mission creation requires an active user role
 - Review actions require case access + active role
 
@@ -205,8 +205,8 @@ railway up --service web
 ```
 
 Configure environment variables in Railway dashboard:
-- All `NEXT_PUBLIC_*` vars
-- `SUPABASE_SERVICE_ROLE_KEY`
+- All `NEXT_PUBLIC_*` vars (including `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
+- `SUPABASE_SECRET_KEY` (optional on web; required on the voice worker)
 - `VOICE_WORKER_BASE_URL` (internal Railway URL)
 - `VOICE_WORKER_INTERNAL_SECRET`
 
@@ -219,7 +219,7 @@ railway up --service voice-worker
 
 Configure environment variables:
 - All Twilio and xAI keys
-- `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (`sb_secret_…` from Settings → API Keys)
 - `VOICE_WORKER_INTERNAL_SECRET` (same as web)
 - `APP_BASE_URL` (public URL of web app)
 - `VOICE_MODE=live` (for production)

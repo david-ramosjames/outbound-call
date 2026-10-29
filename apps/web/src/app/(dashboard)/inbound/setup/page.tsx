@@ -18,7 +18,7 @@ interface EnvVar {
 
 const WORKER_VARS: EnvVar[] = [
   { key: 'SUPABASE_URL', need: 'required', purpose: 'Database the worker reads settings from and writes calls to.' },
-  { key: 'SUPABASE_SERVICE_ROLE_KEY', need: 'required', purpose: 'Server database key (secret).' },
+  { key: 'SUPABASE_SECRET_KEY', need: 'required', purpose: 'Secret key (sb_secret_…) from Settings → API Keys. Bypasses RLS; never expose it. Legacy SUPABASE_SERVICE_ROLE_KEY still works until you remove it.' },
   { key: 'VOICE_WORKER_INTERNAL_SECRET', need: 'required', purpose: 'Shared secret so only this web app can call the worker. Must match the web app.' },
   { key: 'VOICE_WORKER_BASE_URL', need: 'required', purpose: "The worker's own public https URL. Used for Twilio callbacks and the Sign Flow status callback." },
   { key: 'APP_BASE_URL', need: 'required', purpose: 'Public URL of this web app.' },
@@ -39,8 +39,8 @@ const WORKER_VARS: EnvVar[] = [
 
 const WEB_VARS: EnvVar[] = [
   { key: 'NEXT_PUBLIC_SUPABASE_URL', need: 'required', purpose: 'Database URL for the browser.' },
-  { key: 'NEXT_PUBLIC_SUPABASE_ANON_KEY', need: 'required', purpose: 'Public database key (access is limited by row-level security).' },
-  { key: 'SUPABASE_SERVICE_ROLE_KEY', need: 'required', purpose: 'Server database key (secret).' },
+  { key: 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', need: 'required', purpose: 'Publishable key (sb_publishable_…) from Settings → API Keys. Safe in the browser; RLS still applies. Legacy NEXT_PUBLIC_SUPABASE_ANON_KEY still works until you remove it.' },
+  { key: 'SUPABASE_SECRET_KEY', need: 'optional', purpose: 'Only needed if a server route uses an admin client. The browser never sees this. Prefer sb_secret_… over the legacy service_role key.' },
   { key: 'NEXT_PUBLIC_APP_URL', need: 'required', purpose: 'Public URL of this web app (Google sign-in redirects).' },
   { key: 'VOICE_WORKER_BASE_URL', need: 'required', purpose: 'Where the web app reaches the voice worker.' },
   { key: 'VOICE_WORKER_INTERNAL_SECRET', need: 'required', purpose: 'Must match the worker. The web app needs no Sign Flow or xAI keys.' },

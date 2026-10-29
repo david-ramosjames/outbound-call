@@ -17,8 +17,10 @@ export async function GET() {
   const set = (v: string | undefined) => Boolean(v && v.trim());
   const web = {
     NEXT_PUBLIC_SUPABASE_URL: set(process.env.NEXT_PUBLIC_SUPABASE_URL),
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: set(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
-    SUPABASE_SERVICE_ROLE_KEY: set(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: set(
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    ),
+    SUPABASE_SECRET_KEY: set(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY),
     NEXT_PUBLIC_APP_URL: set(process.env.NEXT_PUBLIC_APP_URL) && !process.env.NEXT_PUBLIC_APP_URL!.includes('localhost'),
     VOICE_WORKER_BASE_URL: set(process.env.VOICE_WORKER_BASE_URL),
     VOICE_WORKER_INTERNAL_SECRET: set(process.env.VOICE_WORKER_INTERNAL_SECRET),

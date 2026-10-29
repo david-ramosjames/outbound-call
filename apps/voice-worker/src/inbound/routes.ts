@@ -292,7 +292,7 @@ inboundRouter.get('/internal/inbound/env-status', async (req: Request, res: Resp
     mode: config.VOICE_MODE,
     env: {
       SUPABASE_URL: set(config.SUPABASE_URL),
-      SUPABASE_SERVICE_ROLE_KEY: set(config.SUPABASE_SERVICE_ROLE_KEY),
+      SUPABASE_SECRET_KEY: set(config.SUPABASE_SECRET_KEY),
       XAI_API_KEY: set(config.XAI_API_KEY),
       XAI_AGENT_ID: set(config.XAI_AGENT_ID),
       XAI_SIP_URI: set(config.XAI_SIP_URI) && !config.XAI_SIP_URI.includes('mock@'),

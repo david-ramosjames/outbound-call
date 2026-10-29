@@ -5,7 +5,10 @@ const isMock = process.env.VOICE_MODE !== 'live';
 
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  /** Preferred: sb_secret_… from Settings → API Keys. */
+  SUPABASE_SECRET_KEY: z.string().default(''),
+  /** Legacy JWT service_role key; used only when SUPABASE_SECRET_KEY is unset. */
+  SUPABASE_SERVICE_ROLE_KEY: z.string().default(''),
 
   XAI_API_KEY: isMock ? z.string().default('mock-xai-key') : z.string().min(1),
   XAI_AGENT_ID: isMock ? z.string().default('mock-agent-id') : z.string().min(1),
@@ -54,7 +57,16 @@ function loadConfig() {
     process.exit(1);
   }
 
-  return result.data;
+  const data = result.data;
+  const secretKey = data.SUPABASE_SECRET_KEY.trim() || data.SUPABASE_SERVICE_ROLE_KEY.trim();
+  if (!secretKey) {
+    console.error(
+      '❌ Invalid environment configuration:\n  SUPABASE_SECRET_KEY: set this (sb_secret_…) or the legacy SUPABASE_SERVICE_ROLE_KEY',
+    );
+    process.exit(1);
+  }
+
+  return { ...data, SUPABASE_SECRET_KEY: secretKey };
 }
 
 export const config = loadConfig();

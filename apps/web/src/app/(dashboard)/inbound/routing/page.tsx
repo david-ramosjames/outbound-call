@@ -148,12 +148,12 @@ export default function RoutingAndHoursPage() {
         <CardHeader>
           <CardTitle>Transfers</CardTitle>
           <CardDescription>
-            Numbers in E.164 format (e.g. +15125550100). Live transfers also require the &ldquo;Human transfer&rdquo; flag in Settings.
+            Numbers in E.164 format (e.g. +15125550100). Live transfers also require the &ldquo;Human transfer&rdquo; flag in Settings. The AI can forward the live call to these numbers.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
-            <Input id="primary" label="Primary transfer number" value={r.primary_transfer_number} onChange={(e) => setRouting({ primary_transfer_number: e.target.value })} />
+            <Input id="primary" label="Primary transfer number" value={r.primary_transfer_number} onChange={(e) => setRouting({ primary_transfer_number: e.target.value })} hint="Staff / intake line" />
             <Input id="backup" label="Backup transfer number" value={r.backup_transfer_number} onChange={(e) => setRouting({ backup_transfer_number: e.target.value })} />
             <Input id="existing" label="Existing-client line" value={r.existing_client_transfer_number} onChange={(e) => setRouting({ existing_client_transfer_number: e.target.value })} hint="Optional; falls back to primary" />
           </div>
@@ -170,11 +170,45 @@ export default function RoutingAndHoursPage() {
           </div>
           <div className="flex flex-wrap gap-6">
             <Toggle checked={r.business_hours_transfer_enabled} onChange={(v) => setRouting({ business_hours_transfer_enabled: v })} label="Transfer during business hours" />
-            <Toggle checked={r.after_hours_transfer_enabled} onChange={(v) => setRouting({ after_hours_transfer_enabled: v })} label="Transfer after hours" description="Only if someone is actually on call" />
+            <Toggle checked={r.after_hours_transfer_enabled} onChange={(v) => setRouting({ after_hours_transfer_enabled: v })} label="Transfer after hours" description="Staff primary/backup only; partner transfers work any time" />
           </div>
           <p className="text-xs text-slate-500">
             If the primary number doesn&apos;t answer, the backup is tried. If nobody answers, the caller goes back to the AI, which apologizes, marks an urgent callback, and keeps collecting information.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Partner firm (non-truck PI)</CardTitle>
+          <CardDescription>
+            For truck-focused lines: keep truck / commercial-vehicle cases here, and live-transfer other personal injury cases to a partner firm (e.g. Ramos James Law). Edit the spoken transfer wording under Instructions.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Toggle
+            checked={r.partner_handles_non_truck_pi}
+            onChange={(v) => setRouting({ partner_handles_non_truck_pi: v })}
+            label="Send non-truck injury cases to a partner firm"
+            description="Requires Human transfer on in Settings, and a partner number below"
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              id="partner-name"
+              label="Partner firm name"
+              placeholder="Ramos James Law"
+              value={r.partner_firm_name}
+              onChange={(e) => setRouting({ partner_firm_name: e.target.value })}
+            />
+            <Input
+              id="partner-number"
+              label="Partner transfer number"
+              placeholder="+15125550100"
+              value={r.partner_transfer_number}
+              onChange={(e) => setRouting({ partner_transfer_number: e.target.value })}
+              hint="Live-dialed when the case is non-truck PI"
+            />
+          </div>
         </CardContent>
       </Card>
 

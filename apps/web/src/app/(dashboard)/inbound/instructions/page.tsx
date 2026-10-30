@@ -77,7 +77,8 @@ const SECTIONS: Array<{ title: string; description: string; fields: Array<{ key:
     title: 'Scripted Language',
     description: 'Exact phrasing for key moments. {{next_open}} is replaced with when the office opens next.',
     fields: [
-      { key: 'transfer_language', label: 'Before a transfer', rows: 2 },
+      { key: 'transfer_language', label: 'Before a team transfer', rows: 2 },
+      { key: 'partner_transfer_language', label: 'Before a partner-firm transfer ({{partner_firm_name}})', rows: 3 },
       { key: 'transfer_failed_language', label: 'Transfer failed', rows: 3 },
       { key: 'contract_language', label: 'Offering the engagement agreement', rows: 2 },
       { key: 'hesitation_language', label: 'When the caller hesitates to sign', rows: 2 },

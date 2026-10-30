@@ -519,6 +519,97 @@ describe('inbound intake: multiple intake lines', () => {
   });
 });
 
+describe('inbound intake: partner firm routing (Trucking Chicas model)', () => {
+  function truckConfig(): InboundConfig {
+    return liveConfig({
+      routing: {
+        primary_transfer_number: '+15125550999',
+        partner_firm_name: 'Ramos James Law',
+        partner_transfer_number: '+15125550888',
+        partner_handles_non_truck_pi: true,
+      },
+    });
+  }
+
+  it('keeps truck cases for this firm (agreement path, not partner transfer)', async () => {
+    const { runtime } = createMemoryRuntime({ config: truckConfig(), now: BUSINESS_NOW });
+    const state = newIntakeState({ intakeId: 'i', callId: 'c', callerIdNumber: '(512) 555-1234' });
+    const tool = (name: string, args: unknown = {}) => executeInboundTool(name, args, state, runtime);
+    await tool('save_contact_information', { caller_name: 'Jane Doe', use_caller_id_number: true });
+    await tool('update_intake', {
+      facts: {
+        ...STRONG_AUTO,
+        case_type: 'trucking',
+        commercial_vehicle_involved: true,
+        incident_description: 'Hit by an 18-wheeler',
+        trucking_company: 'Swift',
+        hospitalized: false,
+        photos_or_video: true,
+      },
+    });
+    const res = await tool('evaluate_qualification');
+    expect(res.output.can_offer_agreement).toBe(true);
+    expect(res.output.transfer_to).not.toBe('partner');
+    expect(res.output.next_step).toBe('offer_contract');
+  });
+
+  it('routes non-truck PI to the partner firm and blocks this firm\'s agreement', async () => {
+    const { runtime } = createMemoryRuntime({ config: truckConfig(), now: BUSINESS_NOW });
+    const state = newIntakeState({ intakeId: 'i', callId: 'c', callerIdNumber: '(512) 555-1234' });
+    const tool = (name: string, args: unknown = {}) => executeInboundTool(name, args, state, runtime);
+    await tool('save_contact_information', { caller_name: 'Jane Doe', use_caller_id_number: true });
+    await tool('update_intake', { facts: STRONG_AUTO });
+    const res = await tool('evaluate_qualification');
+    expect(res.output.next_step).toBe('offer_transfer');
+    expect(res.output.transfer_to).toBe('partner');
+    expect(res.output.transfer_firm).toBe('Ramos James Law');
+    expect(res.output.can_offer_agreement).toBe(false);
+    expect(String(res.output.say_before_transfer)).toContain('Ramos James Law');
+
+    const xfer = await tool('transfer_to_human', { reason: 'Non-truck PI for partner' });
+    expect(xfer.ok).toBe(true);
+    expect(state.transfers[0]?.label).toBe('partner');
+    expect(state.transfers[0]?.destination).toBe('+15125550888');
+  });
+
+  it('still partners-transfers after hours (partner line is always available)', async () => {
+    const { runtime } = createMemoryRuntime({ config: truckConfig(), now: AFTER_HOURS_NOW });
+    const state = newIntakeState({ intakeId: 'i', callId: 'c', callerIdNumber: '(512) 555-1234' });
+    const tool = (name: string, args: unknown = {}) => executeInboundTool(name, args, state, runtime);
+    await tool('save_contact_information', { caller_name: 'Jane Doe', use_caller_id_number: true });
+    await tool('update_intake', { facts: STRONG_AUTO });
+    await tool('evaluate_qualification');
+    const actions = availableActionsFor(state, runtime);
+    expect(actions.partnerCase).toBe(true);
+    expect(actions.canTransfer).toBe(true);
+    expect(actions.nextTransferTarget?.label).toBe('partner');
+  });
+
+  it('puts partner routing rules in the agent prompt when configured', () => {
+    const config = truckConfig();
+    const ins = resolveAgentInstructions({}, 'Trucking Chicas');
+    const state = newIntakeState({ intakeId: 'i', callId: 'c' });
+    const prompt = buildInboundInstructions({
+      instructions: ins,
+      config,
+      state,
+      business: {
+        status: 'business_hours',
+        timezone: 'America/Chicago',
+        localTime: '10:00 AM',
+        nextOpenPhrase: null,
+        nextOpenAt: null,
+        holidayName: null,
+        overridden: false,
+      },
+      now: BUSINESS_NOW,
+    });
+    expect(prompt).toContain('Case routing (this firm vs partner)');
+    expect(prompt).toContain('Ramos James Law');
+    expect(prompt).toContain('Never transfer a truck case to the partner');
+  });
+});
+
 describe('inbound intake: qualification reasons are internal', () => {
   it('evaluate_qualification output does not expose the result or reasons', async () => {
     const s = setup();

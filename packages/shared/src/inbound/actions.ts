@@ -1,4 +1,5 @@
 import type { BusinessStatus } from './business-hours.js';
+import { isPartnerPiCase, partnerFirmName } from './case-routing.js';
 import type { ContractDeliveryMethod, InboundConfig } from './config.js';
 import { detectUrgentIndicators, getMissingFields } from './intake-engine.js';
 import type { InboundIntakeState } from './state.js';
@@ -20,8 +21,10 @@ export function contractDeliveryOptions(state: InboundIntakeState, config: Inbou
 }
 
 export interface TransferTarget {
-  label: 'primary' | 'backup' | 'existing_client';
+  label: 'primary' | 'backup' | 'existing_client' | 'partner';
   number: string;
+  /** Display name for partner transfers (e.g. Ramos James Law). */
+  firmName?: string;
 }
 
 export interface AvailableActions {
@@ -36,12 +39,14 @@ export interface AvailableActions {
   shouldRequestCallback: boolean;
   callbackPriority: 'urgent' | 'normal';
   urgent: boolean;
+  /** Partner-firm PI case (non-truck) that should be live-transferred. */
+  partnerCase: boolean;
   recommendedNextAction: NextAction;
   /** Plain-language guidance for the agent. Never contains rules or scores. */
   guidance: string;
 }
 
-function transferTargets(config: InboundConfig, existingClient: boolean): TransferTarget[] {
+function staffTransferTargets(config: InboundConfig, existingClient: boolean): TransferTarget[] {
   const r = config.routing;
   const list: TransferTarget[] = [];
   if (existingClient && r.existing_client_transfer_number.trim()) {
@@ -50,6 +55,12 @@ function transferTargets(config: InboundConfig, existingClient: boolean): Transf
   if (r.primary_transfer_number.trim()) list.push({ label: 'primary', number: r.primary_transfer_number.trim() });
   if (r.backup_transfer_number.trim()) list.push({ label: 'backup', number: r.backup_transfer_number.trim() });
   return list;
+}
+
+function partnerTarget(config: InboundConfig): TransferTarget | null {
+  const number = config.routing.partner_transfer_number.trim();
+  if (!number) return null;
+  return { label: 'partner', number, firmName: partnerFirmName(config) };
 }
 
 /**
@@ -68,27 +79,49 @@ export function computeAvailableActions(
   const qual = state.qualification?.result ?? null;
   const urgent = state.highPriority || detectUrgentIndicators(facts, now).length > 0 || qual === 'high_priority';
   const open = business.status === 'business_hours';
+  const partnerCase = isPartnerPiCase(facts, config);
+  const tried = new Set(state.transfers.map((t) => t.destination));
+  const hasNameAndPhone = Boolean(facts.caller_name && (facts.phone || state.callerIdNumber));
 
   // ----- Transfer -----
-  const tried = new Set(state.transfers.map((t) => t.destination));
-  const remaining = transferTargets(config, existingClient).filter((t) => !tried.has(t.number));
   let transferBlockedReason: string | null = null;
-  if (!flags.human_transfer_enabled) transferBlockedReason = 'Human transfer is turned off';
-  else if (remaining.length === 0)
-    transferBlockedReason = state.transfers.length > 0 ? 'All transfer numbers already tried' : 'No transfer number configured';
-  else if (open && !routing.business_hours_transfer_enabled) transferBlockedReason = 'Transfers disabled during business hours';
-  else if (!open && !routing.after_hours_transfer_enabled) transferBlockedReason = 'Team is not available (after hours)';
-  else if (state.transferInProgress) transferBlockedReason = 'Transfer already in progress';
-  else if (!existingClient && !(qual === 'qualified' || qual === 'high_priority' || urgent))
-    transferBlockedReason = 'Lead has not qualified for a live transfer';
-  else if (!facts.caller_name || !(facts.phone || state.callerIdNumber))
-    transferBlockedReason = 'Collect name and callback number before transferring';
-  const canTransfer = transferBlockedReason === null;
+  let nextTransferTarget: TransferTarget | null = null;
 
-  // ----- Contract -----
+  if (!flags.human_transfer_enabled) {
+    transferBlockedReason = 'Human transfer is turned off';
+  } else if (state.transferInProgress) {
+    transferBlockedReason = 'Transfer already in progress';
+  } else if (!hasNameAndPhone) {
+    transferBlockedReason = 'Collect name and callback number before transferring';
+  } else if (partnerCase) {
+    // Partner transfers are available any time of day (the partner answers the line).
+    const partner = partnerTarget(config);
+    if (!partner || tried.has(partner.number)) {
+      transferBlockedReason = partner ? 'Partner transfer already tried' : 'No partner transfer number configured';
+    } else {
+      nextTransferTarget = partner;
+    }
+  } else {
+    const remaining = staffTransferTargets(config, existingClient).filter((t) => !tried.has(t.number));
+    if (remaining.length === 0) {
+      transferBlockedReason = state.transfers.length > 0 ? 'All transfer numbers already tried' : 'No transfer number configured';
+    } else if (open && !routing.business_hours_transfer_enabled) {
+      transferBlockedReason = 'Transfers disabled during business hours';
+    } else if (!open && !routing.after_hours_transfer_enabled) {
+      transferBlockedReason = 'Team is not available (after hours)';
+    } else if (!existingClient && !(qual === 'qualified' || qual === 'high_priority' || urgent)) {
+      transferBlockedReason = 'Lead has not qualified for a live transfer';
+    } else {
+      nextTransferTarget = remaining[0] ?? null;
+    }
+  }
+  const canTransfer = transferBlockedReason === null && nextTransferTarget !== null;
+
+  // ----- Contract (never for partner-bound cases) -----
   const contractDelivery = contractDeliveryOptions(state, config);
   let contractBlockedReason: string | null = null;
-  if (!flags.contracts_enabled) contractBlockedReason = 'Engagement agreements are turned off';
+  if (partnerCase) contractBlockedReason = 'This matter is for the partner firm; do not send this firm\'s agreement';
+  else if (!flags.contracts_enabled) contractBlockedReason = 'Engagement agreements are turned off';
   else if (contracts.provider === 'none') contractBlockedReason = 'No agreement provider configured';
   else if (!flags.sms_enabled && contracts.provider === 'sms_link') contractBlockedReason = 'SMS is turned off';
   else if (contracts.provider === 'signflow' && !contractTemplateIdFor(config, state.language))
@@ -112,31 +145,36 @@ export function computeAvailableActions(
   const awaitingSignature =
     contracts.stay_on_line_to_sign && state.contract.sent && !state.contract.signed && !state.contract.closedReason;
   let recommended: NextAction;
+  // Truck-focused lines keep truck leads on this call (intake / agreement / callback).
+  // Staff live-transfer is for existing clients; partner transfer is for non-truck PI.
+  const staffLiveTransferForNewLeads = !routing.partner_handles_non_truck_pi;
 
   if (missing.mode === 'identify_caller') recommended = 'identify_caller';
   else if (existingClient) recommended = missing.missing.length > 0 ? 'continue_intake' : canTransfer ? 'offer_transfer' : 'take_message';
   else if (facts.caller_type === 'other') recommended = missing.missing.length > 0 ? 'continue_intake' : 'take_message';
   else if (missing.mode === 'urgent_minimum') recommended = 'collect_minimum_contact';
-  else if (urgent && canTransfer) recommended = 'offer_transfer';
+  else if (urgent && canTransfer && !partnerCase && staffLiveTransferForNewLeads) recommended = 'offer_transfer';
   else if (missing.missing.length > 0) recommended = 'continue_intake';
   else if (!state.qualification) recommended = 'complete_intake';
+  else if (partnerCase && canTransfer) recommended = 'offer_transfer';
+  else if (partnerCase && !canTransfer) recommended = 'request_callback';
   else if (qual === 'not_qualified') recommended = 'decline_politely';
   else if (awaitingSignature) recommended = 'help_sign_agreement';
-  else if (qual === 'qualified' && canTransfer) recommended = 'offer_transfer';
+  else if (qual === 'qualified' && canTransfer && staffLiveTransferForNewLeads) recommended = 'offer_transfer';
   else if (canOfferContract && !state.contract.offered) recommended = 'offer_contract';
-  else if ((qual === 'qualified' || urgent) && state.callbacks.length === 0) recommended = 'request_callback';
+  else if ((qual === 'qualified' || qual === 'high_priority' || urgent) && state.callbacks.length === 0) recommended = 'request_callback';
   else recommended = 'complete_intake';
 
   const shouldRequestCallback =
     state.callbacks.length === 0 &&
-    (transferFailed || urgent || existingClient || qual === 'qualified' || qual === 'needs_review');
-  const callbackPriority: 'urgent' | 'normal' = urgent || transferFailed ? 'urgent' : 'normal';
+    (transferFailed || urgent || existingClient || partnerCase || qual === 'qualified' || qual === 'needs_review');
+  const callbackPriority: 'urgent' | 'normal' = urgent || transferFailed || partnerCase ? 'urgent' : 'normal';
 
   return {
     businessStatus: business.status,
     canTransfer,
     transferBlockedReason,
-    nextTransferTarget: canTransfer ? remaining[0] ?? null : null,
+    nextTransferTarget: canTransfer ? nextTransferTarget : null,
     canOfferContract,
     contractBlockedReason,
     contractDelivery,
@@ -144,12 +182,20 @@ export function computeAvailableActions(
     shouldRequestCallback,
     callbackPriority,
     urgent,
+    partnerCase,
     recommendedNextAction: recommended,
-    guidance: guidanceFor(recommended, business, urgent, transferFailed),
+    guidance: guidanceFor(recommended, business, urgent, transferFailed, partnerCase, partnerFirmName(config)),
   };
 }
 
-function guidanceFor(action: NextAction, business: BusinessStatus, urgent: boolean, transferFailed: boolean): string {
+function guidanceFor(
+  action: NextAction,
+  business: BusinessStatus,
+  urgent: boolean,
+  transferFailed: boolean,
+  partnerCase: boolean,
+  partnerName: string,
+): string {
   const followUp = business.nextOpenPhrase ? `as soon as the office opens (${business.nextOpenPhrase})` : 'as soon as possible';
   switch (action) {
     case 'identify_caller':
@@ -159,15 +205,19 @@ function guidanceFor(action: NextAction, business: BusinessStatus, urgent: boole
     case 'continue_intake':
       return 'Keep the conversation going naturally. Ask about the next missing item in your own words, one question at a time. Skip anything they already told you.';
     case 'offer_transfer':
-      return 'Offer to connect them with someone from the team now using the transfer language. If they agree, call transfer_to_human.';
+      return partnerCase
+        ? `This is a case for ${partnerName}. Confirm name and callback number if needed, say the partner transfer language, then call transfer_to_human.`
+        : 'Offer to connect them with someone from the team now using the transfer language. If they agree, call transfer_to_human.';
     case 'offer_contract':
       return 'You may offer the engagement agreement using the contract language. Only call send_engagement_agreement after they clearly say yes.';
     case 'help_sign_agreement':
       return 'The agreement has been sent. Stay on the line and help them open, review, and sign it. Answer questions from the agreement. When they say they finished, call check_agreement_status; only confirm it is signed if the tool says so. If they would rather sign later, that is fine: request_callback, then complete_intake.';
     case 'request_callback':
-      return transferFailed || urgent
-        ? `Call request_callback with urgent priority and tell them someone will reach out ${business.status === 'business_hours' ? 'shortly' : followUp}.`
-        : `Call request_callback and tell them someone will follow up ${business.status === 'business_hours' ? 'soon' : followUp}.`;
+      return partnerCase
+        ? `The partner transfer is not available. Call request_callback with urgent priority so ${partnerName} can follow up, then complete_intake.`
+        : transferFailed || urgent
+          ? `Call request_callback with urgent priority and tell them someone will reach out ${business.status === 'business_hours' ? 'shortly' : followUp}.`
+          : `Call request_callback and tell them someone will follow up ${business.status === 'business_hours' ? 'soon' : followUp}.`;
     case 'take_message':
       return `Take a clear message (call request_callback) and let them know their case team will follow up ${business.status === 'business_hours' ? 'soon' : followUp}.`;
     case 'decline_politely':

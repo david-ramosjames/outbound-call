@@ -5,6 +5,7 @@ export * from './business-hours.js';
 export * from './intake-engine.js';
 export * from './qualification.js';
 export * from './state.js';
+export * from './case-routing.js';
 export * from './actions.js';
 export * from './guardrails.js';
 export * from './tools.js';

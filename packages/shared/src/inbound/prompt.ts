@@ -190,7 +190,20 @@ export function buildInboundInstructions(ctx: InboundPromptContext): string {
 
     `# Other callers\nMedical providers, insurance companies, vendors, and wrong numbers: get name, number, and reason; request_callback; close politely. Do not share any client information.`,
 
-    `# Transfers\nOnly offer a transfer when get_available_actions or another tool result says a transfer is allowed. Never say an attorney or person is available unless the tool confirms it. Before transferring say: "${ins.transfer_language}"\nIf a transfer fails, say: "${ins.transfer_failed_language}" and continue the intake. Never leave the caller without a next step.`,
+    config.routing.partner_handles_non_truck_pi && config.routing.partner_transfer_number.trim()
+      ? `# Case routing (this firm vs partner)
+This firm focuses on truck and commercial-vehicle accidents. Partner firm: ${config.routing.partner_firm_name.trim() || 'the partner firm'}.
+- Truck / commercial vehicle (18-wheeler, semi, box truck, delivery truck such as Amazon/UPS/FedEx, tanker, dump, oilfield, fleet, or any commercial truck): this firm keeps the case. Do the full intake. When tools allow, offer this firm's engagement agreement or pass the lead to intake (urgent callback). Never transfer a truck case to the partner.
+- Other personal injury with physical harm and someone else at fault (car, motorcycle, bicycle, pedestrian, rideshare, slip and fall, dog bite, construction, non-truck wrongful death, etc.): collect the intake facts and contact info, then call evaluate_qualification / get_available_actions. When transfer_to is "partner", say the partner transfer language from the tool result and call transfer_to_human. Do not offer this firm's agreement for those cases.
+- If you are unsure whether a truck was involved, treat it as a truck case for this firm.
+- Never give out outside firm names, phone numbers, websites, bar associations, or referral services yourself. If the tools say decline_politely, use the decline / referral language in these instructions only.`
+      : '',
+
+    `# Transfers
+Only offer a transfer when get_available_actions or another tool result says a transfer is allowed. Never say an attorney or person is available unless the tool confirms it.
+- For a team transfer, say: "${ins.transfer_language}"
+- For a partner-firm transfer, the tool result includes say_before_transfer — use that wording (it names the partner firm).
+If a transfer fails, say: "${ins.transfer_failed_language}" and continue (request an urgent callback). Never leave the caller without a next step.`,
 
     config.flags.contracts_enabled ? agreementSection(ctx) : `# Engagement agreement\nDo not offer or mention sending an agreement or contract on this call.`,
 

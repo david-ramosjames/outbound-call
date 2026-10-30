@@ -54,6 +54,14 @@ export const routingSchema = z.object({
   primary_transfer_number: z.string().default(''),
   backup_transfer_number: z.string().default(''),
   existing_client_transfer_number: z.string().default(''),
+  /**
+   * Partner firm for cases this line does not keep (e.g. Trucking Chicas → Ramos James Law
+   * for non-truck personal injury). Live-transferred when partner_handles_non_truck_pi is on.
+   */
+  partner_firm_name: z.string().default(''),
+  partner_transfer_number: z.string().default(''),
+  /** When true, non-truck PI cases are transferred to the partner instead of kept / contracted. */
+  partner_handles_non_truck_pi: z.boolean().default(false),
   business_hours_transfer_enabled: z.boolean().default(true),
   after_hours_transfer_enabled: z.boolean().default(false),
   transfer_timeout_seconds: z.number().int().min(5).max(120).default(25),
@@ -523,6 +531,12 @@ export const agentInstructionsSchema = z.object({
   transfer_language: z
     .string()
     .default("Based on what you've told me, I'd like to connect you with someone from our team. Please stay on the line."),
+  /** Said before transferring to the partner firm ({{partner_firm_name}} is filled in). */
+  partner_transfer_language: z
+    .string()
+    .default(
+      "Based on what you've shared, this sounds like a case our partner firm, {{partner_firm_name}}, can help with. I've logged the details and I'm connecting you with them right now. Please stay on the line.",
+    ),
   transfer_failed_language: z
     .string()
     .default(

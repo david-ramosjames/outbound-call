@@ -320,6 +320,7 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
       await refreshDerivedState(state, runtime);
       await runtime.persist(state);
       const actions = availableActionsFor(state, runtime);
+      const partner = actions.nextTransferTarget?.label === 'partner';
       return {
         name,
         ok: true,
@@ -328,6 +329,18 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
           next_step: actions.recommendedNextAction,
           guidance: actions.guidance,
           can_transfer: actions.canTransfer,
+          ...(actions.canTransfer
+            ? {
+                transfer_to: actions.nextTransferTarget?.label ?? null,
+                transfer_firm: partner ? (actions.nextTransferTarget?.firmName ?? null) : null,
+                say_before_transfer: partner
+                  ? instructions.partner_transfer_language.replace(
+                      /\{\{partner_firm_name\}\}/g,
+                      actions.nextTransferTarget?.firmName ?? 'our partner firm',
+                    )
+                  : instructions.transfer_language,
+              }
+            : {}),
           can_offer_agreement: actions.canOfferContract,
           ...(actions.canOfferContract ? { agreement_delivery: actions.contractDelivery } : {}),
           note: 'This evaluation is internal. Never tell the caller about criteria, scores, or reasons.',
@@ -346,6 +359,7 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
 
     case 'get_available_actions': {
       const a = availableActionsFor(state, runtime);
+      const partner = a.nextTransferTarget?.label === 'partner';
       return {
         name,
         ok: true,
@@ -354,6 +368,15 @@ async function run(name: InboundToolName, args: Record<string, any>, state: Inbo
           office_open: a.businessStatus === 'business_hours',
           can_transfer: a.canTransfer,
           transfer_note: a.canTransfer ? null : a.transferBlockedReason,
+          ...(a.canTransfer
+            ? {
+                transfer_to: a.nextTransferTarget?.label ?? null,
+                transfer_firm: partner ? (a.nextTransferTarget?.firmName ?? null) : null,
+                say_before_transfer: partner
+                  ? instructions.partner_transfer_language.replace(/\{\{partner_firm_name\}\}/g, a.nextTransferTarget?.firmName ?? 'our partner firm')
+                  : instructions.transfer_language,
+              }
+            : {}),
           can_offer_agreement: a.canOfferContract,
           ...(a.canOfferContract ? { agreement_delivery: a.contractDelivery } : {}),
           ...(state.contract.sent ? { agreement: { opened: state.contract.viewed, signed: state.contract.signed } } : {}),

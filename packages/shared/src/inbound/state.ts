@@ -4,7 +4,7 @@ import type { InboundIntakeStatus, InboundLanguage, NextAction } from './types.j
 
 export interface TransferAttempt {
   destination: string;
-  label: 'primary' | 'backup' | 'existing_client';
+  label: 'primary' | 'backup' | 'existing_client' | 'partner';
   startedAt: string;
   success: boolean | null;
   failureReason: string | null;
